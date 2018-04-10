@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from bs4 import BeautifulSoup
 
 IMG_SIZE=1000
-SM_IMG_SIZE=7
+SM_IMG_SIZE=10
 IMG_SIZES=[3,5,7,10,13,21]
 
 
@@ -133,7 +133,7 @@ def process_inkml(fn, gt_df):
 
     sfn = get_soup_fn(soup)
     symbol = get_GT_symbol(sfn, gt_df)
-    print(fn,":",sfn,":", symbol)
+    #print(fn,":",sfn,":", symbol)
 
     traces, ar, ad = process_traces(soup.find_all('trace'))
     '''
@@ -156,8 +156,14 @@ def process_inkml(fn, gt_df):
     im_arr = []
     for sz in IMG_SIZES:
         sim = im.resize((sz,sz), Image.LANCZOS)
-        sim = sim.filter(ImageFilter.GaussianBlur())
+        if (sz > SM_IMG_SIZE):
+            sim = sim.filter(ImageFilter.BLUR)
         #sim.save(fn+".bmp")
+        else:
+            rim = sim.rotate(15)
+            lim = sim.rotate(-15)
+            im_arr.extend(np.array(rim).flatten().tolist())
+            im_arr.extend(np.array(lim).flatten().tolist())
 
         im_arr.extend(np.array(sim).flatten().tolist())
 
@@ -171,8 +177,16 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
-    for f in glob(os.path.join(fdir, "*.inkml")):
+    to_process = glob(os.path.join(fdir, "*.inkml"))
+    n_to_process = len(to_process)
+    n_done = 0
+    for f in to_process:
         processed.append(process_inkml(f, gt_df))
+        n_done += 1
+        p_done = n_done/n_to_process
+        p20 = round(p_done*20)
+        print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, f), end='', flush=True)
+    print("\nDone!")
 
     columns=["fn","symbol_fn","symbol","image", "aspect", "avg_dist", "n_traces"]
     pdf = pd.DataFrame(processed, columns=columns)
@@ -206,7 +220,6 @@ def main():
 
     data = preprocess_dir(data_dir_fn, df)
     print(data.head())
-
 
 
 if __name__=="__main__":
