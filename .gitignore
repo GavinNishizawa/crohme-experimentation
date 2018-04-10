@@ -2,3 +2,5 @@
 
 provided-files/
 
+**/__pycache__
+
