@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import math
 from glob import glob
 import numpy as np
 import pandas as pd
@@ -9,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from bs4 import BeautifulSoup
 
 IMG_SIZE=1000
-SM_IMG_SIZE=10
+SM_IMG_SIZE=3
 IMG_SIZES=[3,5,7,10,13,21]
 
 
@@ -74,20 +75,30 @@ def process_traces(ts):
             (a[0]-b[0])**2 + \
             (a[1]-b[1])**2)**(1/2)
 
+    angle = lambda a,b: (\
+            math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
+
+    angle_pts = []
     for id_t in id_traces:
         trace = id_t[1]
         n_pts = len(trace)
         midpoints = [None]*n_pts
         e_dists = [0]*n_pts
+        angles = [0]*n_pts
+        d_angles = [None]*n_pts
 
         # calc midpoints of consecutive points in the trace
         midpoints[0] = trace[0]
+        d_angles[0] = tuple((0,0))
         for i in range(1,n_pts):
             last_pt = trace[i-1]
             pt = trace[i]
 
             midpoints[i] = midpoint(last_pt, pt)
             e_dists[i] = e_dist(last_pt, pt)
+            angles[i] = angle(midpoints[i], midpoints[i-1]) - angles[i-1]
+            t_dist = d_angles[i-1][0] + e_dists[i]
+            d_angles[i] = tuple((t_dist,angles[i]))
 
         '''
         aug_trace = []
@@ -98,11 +109,13 @@ def process_traces(ts):
 
         id_t[1].clear()
         id_t[1].extend(midpoints)
+        angle_pts.extend(d_angles)
+
 
     # average distance between points
     ad = sum(e_dists)/len(e_dists)
 
-    return id_traces, ar, ad
+    return id_traces, ar, ad, angle_pts
 
 
 # convert filename of xml file to beautiful soup object
@@ -135,37 +148,41 @@ def process_inkml(fn, gt_df):
     symbol = get_GT_symbol(sfn, gt_df)
     #print(fn,":",sfn,":", symbol)
 
-    traces, ar, ad = process_traces(soup.find_all('trace'))
+    traces, ar, ad, angle_pts = process_traces(soup.find_all('trace'))
     '''
     for t in traces:
         print("Trace",t[0],":\n", t[1] )
     '''
 
-    im = Image.new('1', (IMG_SIZE,IMG_SIZE))
-    draw = ImageDraw.Draw(im)
-    for t in traces:
-        last = None
-        for c in t[1]:
-            if None != last:
-                last.extend(c)
-                width = 3 + round(IMG_SIZE/SM_IMG_SIZE)
-                draw.line(last, fill=128, width=width)
-            last = list(c)
-    #im.show()
-    #im = im.resize((SM_IMG_SIZE-3,SM_IMG_SIZE-3), Image.LANCZOS)
+    scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
+
     im_arr = []
     for sz in IMG_SIZES:
-        sim = im.resize((sz,sz), Image.LANCZOS)
-        if (sz > SM_IMG_SIZE):
-            sim = sim.filter(ImageFilter.BLUR)
-        #sim.save(fn+".bmp")
-        else:
-            rim = sim.rotate(15)
-            lim = sim.rotate(-15)
-            im_arr.extend(np.array(rim).flatten().tolist())
-            im_arr.extend(np.array(lim).flatten().tolist())
+        im = Image.new('1', (sz,sz))
+        draw = ImageDraw.Draw(im)
+        sv = IMG_SIZE/sz
+        width = round(1/sz)
+        for t in traces:
+            last = None
+            for c in t[1]:
+                scaled = scale(c,sv)
+                if None != last:
+                    last.extend(scaled)
+                    draw.line(last, fill=128, width=width)
+                last = list(scaled)
+        #im.save(fn+str(sz)+".bmp")
+        im_arr.extend(np.array(im).flatten().tolist())
 
-        im_arr.extend(np.array(sim).flatten().tolist())
+    # angles
+    n_bins = 30
+    scaled_pts = [0]*n_bins
+    angle_pts.sort()
+    max_dist = angle_pts[-1][0]
+    for c in angle_pts:
+        ind = round(c[0]*(n_bins-1)/(max_dist+1))
+        scaled_pts[ind] = (scaled_pts[ind] + c[1])%360
+
+    im_arr.extend(scaled_pts)
 
     return (fn, sfn, symbol, im_arr, ar, ad, len(traces))
 
@@ -185,7 +202,7 @@ def preprocess_dir(fdir, gt_df):
         n_done += 1
         p_done = n_done/n_to_process
         p20 = round(p_done*20)
-        print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, f), end='', flush=True)
+        print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, os.path.basename(f)), end='', flush=True)
     print("\nDone!")
 
     columns=["fn","symbol_fn","symbol","image", "aspect", "avg_dist", "n_traces"]

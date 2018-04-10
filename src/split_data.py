@@ -12,8 +12,10 @@ def split_data(data, ratio):
     return train, test
 
 
-def get_splits(data, ratio):
+def get_splits(data, ratio, train_p, total_p):
+    data, ignore = split_data(data, total_p)
     train, test = split_data(data, ratio)
+    train, ignore = split_data(train, train_p)
 
     col_list = train.columns.tolist()
     to_rm = ['symbol','image','fn','symbol_fn']
