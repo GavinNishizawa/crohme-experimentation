@@ -233,9 +233,6 @@ def process_inkml(fn, gt_df):
         ind = round(n_bins*(a%360)/360)%n_bins
         a_angle_bins[ind] += 1
 
-    im_arr.extend(r_angle_bins)
-    im_arr.extend(a_angle_bins)
-
     # bin distances and midpoint distances
     n_bins = 8
     max_dist = max(max(dists),1)
@@ -250,20 +247,17 @@ def process_inkml(fn, gt_df):
         ind = round(n_bins*(d/max_dist))%n_bins
         mp_dist_bins[ind] += 1
 
-    im_arr.extend(dist_bins)
-    im_arr.extend(mp_dist_bins)
-
     # bin angle points
     n_bins = 30
     scaled_angle_pts = scale_angle_pts(angle_pts, n_bins)
-    im_arr.extend(scaled_angle_pts)
 
     # bin mp angle points
     n_bins = 30
     scaled_mp_angle_pts = scale_angle_pts(mp_angle_pts, n_bins)
-    im_arr.extend(scaled_mp_angle_pts)
 
-    return (im_arr, fn, sfn, symbol, ar, ad, len(traces))
+
+    im_arr.extend((r_angle_bins, a_angle_bins, dist_bins, mp_dist_bins, scaled_angle_pts, scaled_mp_angle_pts, fn, sfn, symbol, ar, ad, len(traces)))
+    return im_arr
 
 
 def preprocess_dir(fdir, gt_df):
@@ -273,6 +267,8 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
+    data = pd.DataFrame()
+    columns= ["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces"]
     to_process = glob(os.path.join(fdir, "*.inkml"))
     n_to_process = len(to_process)
     n_done = 0
@@ -284,14 +280,11 @@ def preprocess_dir(fdir, gt_df):
         print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, os.path.basename(f)), end='', flush=True)
 
     print("\nPerforming additional preprocessing...")
-    processed = np.array(processed)
-    columns=["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces"]
-    print("\tConverting image to dataframe...")
-    data = pd.DataFrame(processed[:,0])#im_arr
-    print("\tConverting rest to dataframe...")
-    data[columns] = pd.DataFrame(processed[:,1:], columns=columns)
-    #print("\tJoining dataframes...")
-    #data[columns] = pdf[columns]
+    data = pd.DataFrame(processed)
+    lc = len(columns)
+    ldc = len(data.columns)
+    d_columns = {v:columns[v-ldc+lc] for v in data.columns[-lc:]}
+    data.rename(columns=d_columns, inplace=True)
     print("\tAdding aspect values...")
 
     aspect_very_high = lambda a: int(a > 3)

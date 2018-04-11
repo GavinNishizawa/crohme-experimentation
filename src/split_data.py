@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import random as r
 
 
@@ -18,15 +19,15 @@ def get_splits(data, ratio, train_p, total_p):
     train, ignore = split_data(train, train_p)
 
     col_list = train.columns.tolist()
-    to_rm = ['symbol','image','fn','symbol_fn']
+    to_rm = ['symbol','fn','symbol_fn']
     for c in to_rm:
         col_list.remove(c)
 
-    train_x = train[col_list]
-    train_y = np.squeeze(train['symbol'].values.tolist())
+    train_x = pd.DataFrame(train[col_list])
+    train_y = pd.DataFrame(train['symbol'])
 
-    test_x = test[col_list]
-    test_y = np.squeeze(test['symbol'].values.tolist())
+    test_x = pd.DataFrame(test[col_list])
+    test_y = pd.DataFrame(test['symbol'])
 
     return train_x, train_y, test_x, test_y
 
