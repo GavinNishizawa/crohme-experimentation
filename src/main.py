@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import os
+import pickle
 import warnings
 import numpy as np
 import pandas as pd
@@ -13,6 +15,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Process a directory of inkml files using a ground truth reference file.")
     parser.add_argument("fdir", type=str, help="directory containing .inkml files")
     parser.add_argument("gt", type=str, help="ground truth file")
+    parser.add_argument("ratio", type=float, help="ratio of train:test (0.0,1.0)")
+    parser.add_argument("train_p", type=float, help="percentage of train using to train (0.0,1.0]")
+    parser.add_argument("total_p", type=float, help="percentage of data used (0.0,1.0]")
 
     return parser.parse_args()
 
@@ -33,12 +38,21 @@ def print_results(name, predict, ys):
     #print(metrics.accuracy_score(predict, ys))
 
 
-def test_model(name, model, splits):
-    train_x, train_y, test_x, test_y = splits
+def train_model(model, train_x, train_y):
     model.fit(train_x, train_y)
+
+
+def test_model(name, model, test_x, test_y):
     prs = model.predict(test_x)
     print_results(name, prs, test_y)
     return prs
+
+
+def train_test(name, model, splits):
+    train_x, train_y, test_x, test_y = splits
+
+    train_model(model, train_x, train_y)
+    return test_model(name, model, test_x, test_y)
 
 
 def get_counts(splits):
@@ -61,7 +75,7 @@ def get_cluster_distances(df, func):
 
 
 def apply_kmeans(splits):
-    print("Adding cluster class distances as features...")
+    print("Adding cluster distances as features...")
     train_x, train_y, test_x, test_y = splits
     n_samples, n_features, n_classes = get_counts(splits)
 
@@ -69,11 +83,11 @@ def apply_kmeans(splits):
     s_train_x = train_x.sample(frac=0.1)
     s_test_x = test_x.sample(frac=0.1)
 
-    kmeans = cluster.MiniBatchKMeans(n_clusters=n_classes)
+    kmeans = cluster.MiniBatchKMeans(n_clusters=n_classes//5)
     kmeans.fit(s_train_x)
     apply_kmeans = lambda d: tuple(kmeans.transform([d]).ravel())
 
-    agglo = cluster.AgglomerativeClustering(n_clusters=n_classes)
+    agglo = cluster.AgglomerativeClustering(n_clusters=n_classes//5)
     agglo.fit(s_train_x)
     apply_agglo = lambda d: tuple(kmeans.transform([d]).ravel())
 
@@ -99,7 +113,7 @@ def apply_reduction(splits, eps):
     print("Before:",n_samples, n_features, n_classes)
 
     min_comp = random_projection.johnson_lindenstrauss_min_dim(n_samples=n_samples, eps=eps)
-    min_comp = min(min_comp//2, n_features)
+    min_comp = min(int(min_comp*1.2), n_features)
     #scaler = preprocessing.StandardScaler()
     scaler = preprocessing.QuantileTransformer()
     feat_agg = cluster.FeatureAgglomeration(n_clusters=min_comp)
@@ -113,14 +127,40 @@ def apply_reduction(splits, eps):
     return splits
 
 
+def get_save_fn(fn):
+    return os.path.join("save",fn+".pkl")
+
+
+def save_obj(fn, obj):
+    sfn = get_save_fn(fn)
+    pickle.dump(obj, open(sfn, 'wb'))
+
+
+def load_obj(fn):
+    sfn = get_save_fn(fn)
+    if os.path.isfile(sfn):
+        return pickle.load(open(sfn, 'rb'))
+
+
 def main():
     args = parse_args()
+    ratio = args.ratio
+    train_p = args.train_p
+    total_p = args.total_p
 
     print("Preprocessing inkml files...")
     data = get_data(args.gt, args.fdir)
 
     print("Splitting data into folds...")
-    splits = get_splits(data, 0.7, train_p=0.5, total_p=0.1)
+
+    # save/load data split
+    split_fn = "split"+str(ratio)+str(train_p)+str(total_p) + os.path.basename(args.fdir)
+
+    splits = load_obj(split_fn)
+    if splits == None:
+        splits = get_splits(data, ratio, train_p, total_p)
+        save_obj(split_fn, splits)
+
     train_x, train_y, test_x, test_y = splits
 
     n_samples, n_features, n_classes = get_counts(splits)
@@ -129,17 +169,17 @@ def main():
     print("Running classification tests...")
     warnings.filterwarnings('ignore')
     # test kd-tree model before PCA
-    #ncc = neighbors.NearestCentroid()
-    #test_model("Before PCA: Nearest Centroid", ncc, splits)
+    ncc = neighbors.NearestCentroid()
+    train_test("Before PCA: Nearest Centroid", ncc, splits)
     #knn = neighbors.KNeighborsClassifier(n_neighbors=5, weights='distance')
-    #test_model("Before PCA: K=5 Neighbors", knn, splits)
+    #train_test("Before PCA: K=5 Neighbors", knn, splits)
     #svmm = svm.SVC(C=100.0, class_weight="balanced",  gamma='auto', tol=0.1)
-    #test_model("Before PCA: SVM", svmm, splits)
+    #train_test("Before PCA: SVM", svmm, splits)
     # test Random Forest model
     rfc = ensemble.RandomForestClassifier()
-    test_model("Before PCA: Random Forest", rfc, splits)
+    train_test("Before PCA: Random Forest", rfc, splits)
     rfc = ensemble.RandomForestClassifier(criterion="entropy")
-    test_model("Before PCA: Random Forest (entropy)", rfc, splits)
+    train_test("Before PCA: Random Forest (entropy)", rfc, splits)
 
     '''
     # scale
@@ -158,22 +198,22 @@ def main():
     train_x, train_y, test_x, test_y = splits
     n_samples, n_features, n_classes = get_counts(splits)
 
-    #ncc = neighbors.NearestCentroid()
-    #test_model("Nearest Centroid", ncc, splits)
+    ncc = neighbors.NearestCentroid()
+    train_test("Nearest Centroid", ncc, splits)
 
     # test Random Forest model
     rfc = ensemble.RandomForestClassifier()
-    test_model("Random Forest", rfc, splits)
+    train_test("Random Forest", rfc, splits)
     rfc = ensemble.RandomForestClassifier(criterion="entropy")
-    test_model("Random Forest (entropy)", rfc, splits)
+    train_test("Random Forest (entropy)", rfc, splits)
 
     # test bag model
     bagc = ensemble.BaggingClassifier(rfc, max_samples=1.0, max_features=0.5, n_estimators=5, n_jobs=-1)
-    test_model("Bagged RF", bagc, splits)
+    train_test("Bagged RF", bagc, splits)
 
     # test Ada Boost model
     abc = ensemble.AdaBoostClassifier(rfc, n_estimators=5)
-    test_model("Ada Boosted RF", abc, splits)
+    train_test("Ada Boosted RF", abc, splits)
 
     # test bag Ada Boost model
     #bagc = ensemble.BaggingClassifier(abc, max_samples=1.0, max_features=0.5, n_estimators=5, n_jobs=-1)
@@ -199,28 +239,24 @@ def main():
     #knn = neighbors.KNeighborsClassifier(n_neighbors=13, weights='distance')
     #test_model("K=13 Neighbors", knn, splits)
 
-    '''
 
-    # test SVM model
-    #svmm = svm.SVC(C=1, class_weight="balanced", gamma=0.5, probability=True)
-    svmm = svm.SVC(C=5.0, class_weight="balanced",  gamma=0.5, tol=0.1, probability=False)
-    test_model("SVM C=5.0, gamma=0.5", svmm, splits)
+    m_name = "SVM C=100.0, gamma=auto"
+    svmm = load_obj(m_name)
+    if svmm == None:
+        svmm = svm.SVC(C=100.0, class_weight="balanced",  gamma='auto', tol=0.1, probability=False)
+        train_model(svmm, train_x, train_y)
+        save_obj("model-"+m_name, svmm)
+    prs = test_model(m_name, svmm, test_x, test_y)
 
-    svmm = svm.SVC(C=5.0, class_weight="balanced",  gamma='auto', tol=0.1, probability=False)
-    test_model("SVM C=5.0, gamma=auto", svmm, splits)
-    '''
+    m_name = "SVM C=100.0, gamma=auto, uniform weights"
+    svmm = load_obj(m_name)
+    if svmm == None:
+        svmm = svm.SVC(C=100.0, gamma='auto', tol=0.1, probability=False)
+        train_model(svmm, train_x, train_y)
+        save_obj("model-"+m_name, svmm)
+    prs = test_model(m_name, svmm, test_x, test_y)
 
-    svmm = svm.SVC(C=100.0, class_weight="balanced",  gamma='auto', tol=0.1, probability=False)
-    prs = test_model("SVM C=100.0, gamma=auto", svmm, splits)
-
-    svmm = svm.SVC(C=100.0, gamma='auto', tol=0.1, probability=True)
-    prs = test_model("SVM C=100.0, gamma=auto, uniform weights", svmm, splits)
-
-
-    # test Ada Boost model
-    #abc = ensemble.AdaBoostClassifier(svmm, learning_rate=1, n_estimators=3)
-    #prs = test_model("Ada Boosted SVM", abc, splits)
-    print(metrics.classification_report(prs, test_y))
+    #print(metrics.classification_report(prs, test_y))
 
 
 if __name__=="__main__":

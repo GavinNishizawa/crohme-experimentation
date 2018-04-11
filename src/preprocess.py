@@ -78,44 +78,71 @@ def process_traces(ts):
     angle = lambda a,b: (\
             math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
 
+    dists = []
+    mp_dists = []
+    r_angles = []
+    a_angles = []
     angle_pts = []
+    mp_angle_pts = []
     for id_t in id_traces:
         trace = id_t[1]
         n_pts = len(trace)
         midpoints = [None]*n_pts
         e_dists = [0]*n_pts
+        mpe_dists = [0]*n_pts
+        abs_angles = [0]*n_pts
         angles = [0]*n_pts
+        mp_angles = [0]*n_pts
         d_angles = [None]*n_pts
+        dmp_angles = [None]*n_pts
 
         # calc midpoints of consecutive points in the trace
         midpoints[0] = trace[0]
         d_angles[0] = tuple((0,0))
+        dmp_angles[0] = tuple((0,0))
         for i in range(1,n_pts):
             last_pt = trace[i-1]
             pt = trace[i]
 
-            midpoints[i] = midpoint(last_pt, pt)
+            # distance
             e_dists[i] = e_dist(last_pt, pt)
-            angles[i] = angle(midpoints[i], midpoints[i-1]) - angles[i-1]
-            t_dist = d_angles[i-1][0] + e_dists[i]
-            d_angles[i] = tuple((t_dist,angles[i]))
 
-        '''
-        aug_trace = []
-        for i in range(n_pts):
-            aug_trace.append(midpoints[i])
-            #aug_trace.append(trace[i])
-        '''
+            # midpoint
+            midpoints[i] = midpoint(last_pt, pt)
+            # midpoint distance
+            mpe_dists[i] = e_dist(midpoints[i], midpoints[i-1])
+            # absolute angles
+            abs_angles[i] = angle(pt, last_pt)
+
+            # relative angles
+            angles[i] = angle(pt, last_pt) - angles[i-1]
+            # relative angles for midpoints
+            mp_angles[i] = angle(midpoints[i], midpoints[i-1]) - mp_angles[i-1]
+
+            # total distance
+            t_dist = d_angles[i-1][0] + e_dists[i]
+            # (total distance, relative angle)
+            d_angles[i] = tuple((t_dist, angles[i]))
+
+            # total midpoint distance
+            tmp_dist = dmp_angles[i-1][0] + mpe_dists[i]
+            # (total midpoint distance, relative midpoint angle)
+            dmp_angles[i] = tuple((tmp_dist,mp_angles[i]))
 
         id_t[1].clear()
         id_t[1].extend(midpoints)
+        dists.extend(e_dists)
+        mp_dists.extend(mpe_dists)
+        a_angles.extend(abs_angles)
+        r_angles.extend(angles)
         angle_pts.extend(d_angles)
+        mp_angle_pts.extend(dmp_angles)
 
 
     # average distance between points
     ad = sum(e_dists)/len(e_dists)
 
-    return id_traces, ar, ad, angle_pts
+    return id_traces, ar, ad, r_angles, a_angles, angle_pts, mp_angle_pts, dists, mp_dists
 
 
 # convert filename of xml file to beautiful soup object
@@ -141,6 +168,17 @@ def get_GT_symbol(fn, gt_df):
     return gt_df[gt_df["fn"] == fn]['gt'].values[0]
 
 
+def scale_angle_pts(pts, n_bins):
+    saps = [0]*n_bins
+    pts.sort()
+    max_dist = pts[-1][0]
+    for p in pts:
+        ind = round(p[0]*(n_bins-1)/(max_dist+1))
+        saps[ind] = (saps[ind] + p[1])%360
+
+    return saps
+
+
 def process_inkml(fn, gt_df):
     soup = xml_to_soup(fn)
 
@@ -148,14 +186,24 @@ def process_inkml(fn, gt_df):
     symbol = get_GT_symbol(sfn, gt_df)
     #print(fn,":",sfn,":", symbol)
 
-    traces, ar, ad, angle_pts = process_traces(soup.find_all('trace'))
     '''
-    for t in traces:
-        print("Trace",t[0],":\n", t[1] )
+    traces: processed traces
+    ar: "aspect ratio"
+    ad: average distance between points
+    r_angles: relative angles
+    a_angles: absolute angles
+    angle_pts: (total distance, relative angle) pairs
+    mp_angle_pts: (total midpoint distance, relative midpoint angle) pairs
+    dists: distances
+    mp_dists: midpoint distances
     '''
+    traces, ar, ad, r_angles, a_angles, \
+            angle_pts, mp_angle_pts, dists, mp_dists \
+            = process_traces(soup.find_all('trace'))
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
+    # draw image from traces at different scales
     im_arr = []
     for sz in IMG_SIZES:
         im = Image.new('1', (sz,sz))
@@ -173,16 +221,47 @@ def process_inkml(fn, gt_df):
         #im.save(fn+str(sz)+".bmp")
         im_arr.extend(np.array(im).flatten().tolist())
 
-    # angles
-    n_bins = 30
-    scaled_pts = [0]*n_bins
-    angle_pts.sort()
-    max_dist = angle_pts[-1][0]
-    for c in angle_pts:
-        ind = round(c[0]*(n_bins-1)/(max_dist+1))
-        scaled_pts[ind] = (scaled_pts[ind] + c[1])%360
+    # bin relative and absolute angles
+    n_bins = 8
+    r_angle_bins = [0]*n_bins
+    for a in r_angles:
+        ind = round(n_bins*(a%360)/360)%n_bins
+        r_angle_bins[ind] += 1
 
-    im_arr.extend(scaled_pts)
+    a_angle_bins = [0]*n_bins
+    for a in a_angles:
+        ind = round(n_bins*(a%360)/360)%n_bins
+        a_angle_bins[ind] += 1
+
+    im_arr.extend(r_angle_bins)
+    im_arr.extend(a_angle_bins)
+
+    # bin distances and midpoint distances
+    n_bins = 8
+    max_dist = max(max(dists),1)
+    dist_bins = [0]*n_bins
+    for d in dists:
+        ind = round(n_bins*(d/max_dist))%n_bins
+        dist_bins[ind] += 1
+
+    max_dist = max(max(mp_dists),1)
+    mp_dist_bins = [0]*n_bins
+    for d in mp_dists:
+        ind = round(n_bins*(d/max_dist))%n_bins
+        mp_dist_bins[ind] += 1
+
+    im_arr.extend(dist_bins)
+    im_arr.extend(mp_dist_bins)
+
+    # bin angle points
+    n_bins = 30
+    scaled_angle_pts = scale_angle_pts(angle_pts, n_bins)
+    im_arr.extend(scaled_angle_pts)
+
+    # bin mp angle points
+    n_bins = 30
+    scaled_mp_angle_pts = scale_angle_pts(mp_angle_pts, n_bins)
+    im_arr.extend(scaled_mp_angle_pts)
 
     return (fn, sfn, symbol, im_arr, ar, ad, len(traces))
 
@@ -203,7 +282,6 @@ def preprocess_dir(fdir, gt_df):
         p_done = n_done/n_to_process
         p20 = round(p_done*20)
         print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, os.path.basename(f)), end='', flush=True)
-    print("\nDone!")
 
     columns=["fn","symbol_fn","symbol","image", "aspect", "avg_dist", "n_traces"]
     pdf = pd.DataFrame(processed, columns=columns)
@@ -224,7 +302,9 @@ def preprocess_dir(fdir, gt_df):
     data['aspect_low'] = pdf['aspect'].apply(aspect_low)
     data['aspect_very_low'] = pdf['aspect'].apply(aspect_very_low)
 
+    print("\nSaving preprocessed data to disk...")
     pickle.dump(data, open(pickle_fn, 'wb'))
+    print("\nDone!")
     return data
 
 
