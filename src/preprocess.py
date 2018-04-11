@@ -263,7 +263,7 @@ def process_inkml(fn, gt_df):
     scaled_mp_angle_pts = scale_angle_pts(mp_angle_pts, n_bins)
     im_arr.extend(scaled_mp_angle_pts)
 
-    return (fn, sfn, symbol, im_arr, ar, ad, len(traces))
+    return (im_arr, fn, sfn, symbol, ar, ad, len(traces))
 
 
 def preprocess_dir(fdir, gt_df):
@@ -283,10 +283,16 @@ def preprocess_dir(fdir, gt_df):
         p20 = round(p_done*20)
         print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, os.path.basename(f)), end='', flush=True)
 
-    columns=["fn","symbol_fn","symbol","image", "aspect", "avg_dist", "n_traces"]
-    pdf = pd.DataFrame(processed, columns=columns)
-    data = pdf['image'].apply(pd.Series)
-    data[columns] = pdf[columns]
+    print("\nPerforming additional preprocessing...")
+    processed = np.array(processed)
+    columns=["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces"]
+    print("\tConverting image to dataframe...")
+    data = pd.DataFrame(processed[:,0])#im_arr
+    print("\tConverting rest to dataframe...")
+    data[columns] = pd.DataFrame(processed[:,1:], columns=columns)
+    #print("\tJoining dataframes...")
+    #data[columns] = pdf[columns]
+    print("\tAdding aspect values...")
 
     aspect_very_high = lambda a: int(a > 3)
     aspect_high = lambda a: int(a > 1.2)
@@ -295,16 +301,16 @@ def preprocess_dir(fdir, gt_df):
     aspect_very_low = lambda a: int(a < 0.3)
     aspect_pos = lambda a: int(a > 1)
 
-    data['aspect_pos'] = pdf['aspect'].apply(aspect_pos)
-    data['aspect_very_high'] = pdf['aspect'].apply(aspect_very_high)
-    data['aspect_high'] = pdf['aspect'].apply(aspect_high)
-    data['aspect_med'] = pdf['aspect'].apply(aspect_med)
-    data['aspect_low'] = pdf['aspect'].apply(aspect_low)
-    data['aspect_very_low'] = pdf['aspect'].apply(aspect_very_low)
+    data['aspect_pos'] = data['aspect'].apply(aspect_pos)
+    data['aspect_very_high'] = data['aspect'].apply(aspect_very_high)
+    data['aspect_high'] = data['aspect'].apply(aspect_high)
+    data['aspect_med'] = data['aspect'].apply(aspect_med)
+    data['aspect_low'] = data['aspect'].apply(aspect_low)
+    data['aspect_very_low'] = data['aspect'].apply(aspect_very_low)
 
     print("\nSaving preprocessed data to disk...")
     pickle.dump(data, open(pickle_fn, 'wb'))
-    print("\nDone!")
+    print("\tDone!")
     return data
 
 

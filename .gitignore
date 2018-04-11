@@ -1,6 +1,7 @@
 *.zip
 
 provided-files/
+pickled/
 
 **/__pycache__
 

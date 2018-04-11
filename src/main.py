@@ -5,7 +5,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import argparse
-from sklearn import linear_model, svm, neighbors, ensemble, metrics, decomposition, cluster, preprocessing, pipeline, random_projection
+from sklearn import linear_model, svm, neighbors, ensemble, metrics, decomposition, cluster, preprocessing, pipeline, random_projection, feature_selection
 
 from preprocess import preprocess_dir
 from split_data import split_data, get_splits
@@ -76,31 +76,28 @@ def get_cluster_distances(df, func):
 
 def apply_kmeans(splits):
     print("Adding cluster distances as features...")
+
+    # feature selection for clusters
+    c_splits = apply_feature_select(splits)
+
     train_x, train_y, test_x, test_y = splits
-    n_samples, n_features, n_classes = get_counts(splits)
+    # cluster splits
+    c_train_x, c_train_y, c_test_x, c_test_y = c_splits
+    n_samples, n_features, n_classes = get_counts(c_splits)
 
-    # only look at a subset for clustering
-    s_train_x = train_x.sample(frac=0.1)
-    s_test_x = test_x.sample(frac=0.1)
-
-    kmeans = cluster.MiniBatchKMeans(n_clusters=n_classes//5)
-    kmeans.fit(s_train_x)
+    kmeans = cluster.MiniBatchKMeans(n_clusters=2*n_classes)
+    kmeans.fit(c_train_x)
     apply_kmeans = lambda d: tuple(kmeans.transform([d]).ravel())
 
-    agglo = cluster.AgglomerativeClustering(n_clusters=n_classes//5)
-    agglo.fit(s_train_x)
-    apply_agglo = lambda d: tuple(kmeans.transform([d]).ravel())
-
     print("\tKMeans...")
-    train_agg = get_cluster_distances(train_x, apply_agglo)
-    test_agg = get_cluster_distances(test_x, apply_agglo)
+    train_km = get_cluster_distances(c_train_x, apply_kmeans)
+    test_km = get_cluster_distances(c_test_x, apply_kmeans)
 
-    print("\tAgglomerative...")
-    train_km = get_cluster_distances(train_x, apply_kmeans)
-    test_km = get_cluster_distances(test_x, apply_kmeans)
+    train_km.index = train_x.index
+    train_x = pd.concat([train_x, train_km], axis=1)
 
-    train_x = pd.concat([train_x, train_km, train_agg], axis=1)
-    test_x = pd.concat([test_x, test_km, test_agg], axis=1)
+    test_km.index = test_x.index
+    test_x = pd.concat([test_x, test_km], axis=1)
 
     splits = (train_x, train_y, test_x, test_y)
     return splits
@@ -113,13 +110,13 @@ def apply_reduction(splits, eps):
     print("Before:",n_samples, n_features, n_classes)
 
     min_comp = random_projection.johnson_lindenstrauss_min_dim(n_samples=n_samples, eps=eps)
-    min_comp = min(int(min_comp*1.2), n_features)
+    min_comp = min(min_comp, n_features)
     #scaler = preprocessing.StandardScaler()
     scaler = preprocessing.QuantileTransformer()
     feat_agg = cluster.FeatureAgglomeration(n_clusters=min_comp)
     pca_pipe = pipeline.Pipeline([('scaler',scaler),('feat_agg',feat_agg)])
-    train_x = pca_pipe.fit_transform(train_x)
-    test_x = pca_pipe.transform(test_x)
+    train_x = pd.DataFrame(pca_pipe.fit_transform(train_x))
+    test_x = pd.DataFrame(pca_pipe.transform(test_x))
 
     splits = (train_x, train_y, test_x, test_y)
     n_samples, n_features, n_classes = get_counts(splits)
@@ -128,7 +125,7 @@ def apply_reduction(splits, eps):
 
 
 def get_save_fn(fn):
-    return os.path.join("save",fn+".pkl")
+    return os.path.join("pickled",fn+".pkl")
 
 
 def save_obj(fn, obj):
@@ -140,6 +137,22 @@ def load_obj(fn):
     sfn = get_save_fn(fn)
     if os.path.isfile(sfn):
         return pickle.load(open(sfn, 'rb'))
+
+
+def apply_feature_select(splits, threshold="mean"):
+    train_x, train_y, test_x, test_y = splits
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_model(xtc, train_x, train_y)
+    print("Max Feature importance:",max(xtc.feature_importances_))
+
+    feat_sel = feature_selection.SelectFromModel(xtc, prefit=True, threshold="median")
+    print("Before feature selection:",train_x.shape)
+
+    train_x = pd.DataFrame(feat_sel.transform(train_x))
+    test_x = pd.DataFrame(feat_sel.transform(test_x))
+    print("After feature selection:",train_x.shape)
+    splits = (train_x, train_y, test_x, test_y)
+    return splits
 
 
 def main():
@@ -169,17 +182,15 @@ def main():
     print("Running classification tests...")
     warnings.filterwarnings('ignore')
     # test kd-tree model before PCA
-    ncc = neighbors.NearestCentroid()
-    train_test("Before PCA: Nearest Centroid", ncc, splits)
-    #knn = neighbors.KNeighborsClassifier(n_neighbors=5, weights='distance')
-    #train_test("Before PCA: K=5 Neighbors", knn, splits)
-    #svmm = svm.SVC(C=100.0, class_weight="balanced",  gamma='auto', tol=0.1)
-    #train_test("Before PCA: SVM", svmm, splits)
+    #ncc = neighbors.NearestCentroid()
+    #train_test("Before PCA: Nearest Centroid", ncc, splits)
     # test Random Forest model
     rfc = ensemble.RandomForestClassifier()
-    train_test("Before PCA: Random Forest", rfc, splits)
+    train_test("Initial: Random Forest", rfc, splits)
     rfc = ensemble.RandomForestClassifier(criterion="entropy")
-    train_test("Before PCA: Random Forest (entropy)", rfc, splits)
+    train_test("Initial: Random Forest (entropy)", rfc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_test("Initial: Extra Trees", xtc, splits)
 
     '''
     # scale
@@ -189,18 +200,51 @@ def main():
     splits = (train_x, train_y, test_x, test_y)
     '''
 
-    # add k means data as features
+    # apply reduction
+    splits = apply_reduction(splits, eps=0.99)
+
+    rfc = ensemble.RandomForestClassifier()
+    train_test("after reduction: Random Forest", rfc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_test("Extra Trees", xtc, splits)
+
+    # feature selection
+    splits = apply_feature_select(splits)
+
+    '''
+    rfc = ensemble.RandomForestClassifier()
+    train_test("After feature select: Random Forest", rfc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_test("Extra Trees", xtc, splits)
+
+    # add k means data as features (seems to reduce accuracy)
     splits = apply_kmeans(splits)
+
+    rfc = ensemble.RandomForestClassifier()
+    train_test("after cluster data: Random Forest", rfc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_test("Extra Trees", xtc, splits)
 
     # apply reduction
     splits = apply_reduction(splits, eps=0.99)
 
+    rfc = ensemble.RandomForestClassifier()
+    train_test("after reduction: Random Forest", rfc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_test("Extra Trees", xtc, splits)
+
+    # feature selection
+    splits = apply_feature_select(splits)
+    '''
+
+
     train_x, train_y, test_x, test_y = splits
     n_samples, n_features, n_classes = get_counts(splits)
 
-    ncc = neighbors.NearestCentroid()
-    train_test("Nearest Centroid", ncc, splits)
+    #ncc = neighbors.NearestCentroid()
+    #train_test("Nearest Centroid", ncc, splits)
 
+    '''
     # test Random Forest model
     rfc = ensemble.RandomForestClassifier()
     train_test("Random Forest", rfc, splits)
@@ -214,35 +258,22 @@ def main():
     # test Ada Boost model
     abc = ensemble.AdaBoostClassifier(rfc, n_estimators=5)
     train_test("Ada Boosted RF", abc, splits)
+    '''
 
-    # test bag Ada Boost model
-    #bagc = ensemble.BaggingClassifier(abc, max_samples=1.0, max_features=0.5, n_estimators=5, n_jobs=-1)
-    #test_model("Bagged Boosted RF", bagc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    train_test("Extra Trees", xtc, splits)
 
-    # test Ada Boost bag model
-    #abc = ensemble.AdaBoostClassifier(bagc, n_estimators=5)
-    #test_model("Boosted Bagged RF", abc, splits)
+    xtc = ensemble.ExtraTreesClassifier(n_estimators=50, n_jobs=-1)
+    train_test("Extra Trees (50)", xtc, splits)
 
-    # test kd-tree model
-    #knn = neighbors.KNeighborsClassifier(n_neighbors=3, weights='distance')
-    #test_model("K=3 Neighbors", knn, splits)
+    svmm = svm.SVC(C=100.0, gamma='auto', tol=0.1, probability=False)
+    train_test("SVM C=100.0, gamma=auto, uniform weights", svmm, splits)
 
-    # test kd-tree model
-    #knn = neighbors.KNeighborsClassifier(n_neighbors=5, weights='distance')
-    #test_model("K=5 Neighbors", knn, splits)
-
-    # test kd-tree model
-    #knn = neighbors.KNeighborsClassifier(n_neighbors=7, weights='distance')
-    #test_model("K=7 Neighbors", knn, splits)
-
-    # test kd-tree model
-    #knn = neighbors.KNeighborsClassifier(n_neighbors=13, weights='distance')
-    #test_model("K=13 Neighbors", knn, splits)
-
-
+    '''
+    # test SVM models
     m_name = "SVM C=100.0, gamma=auto"
     svmm = load_obj(m_name)
-    if svmm == None:
+    if True or svmm == None:
         svmm = svm.SVC(C=100.0, class_weight="balanced",  gamma='auto', tol=0.1, probability=False)
         train_model(svmm, train_x, train_y)
         save_obj("model-"+m_name, svmm)
@@ -250,11 +281,18 @@ def main():
 
     m_name = "SVM C=100.0, gamma=auto, uniform weights"
     svmm = load_obj(m_name)
-    if svmm == None:
+    if True or svmm == None:
         svmm = svm.SVC(C=100.0, gamma='auto', tol=0.1, probability=False)
         train_model(svmm, train_x, train_y)
         save_obj("model-"+m_name, svmm)
     prs = test_model(m_name, svmm, test_x, test_y)
+
+    svmm = svm.LinearSVC(dual=False)
+    train_test("LinearSVC", svmm, splits)
+
+    #svmm = svm.LinearSVC(penalty='l1', dual=False)
+    #train_test("LinearSVC l1", svmm, splits)
+    '''
 
     #print(metrics.classification_report(prs, test_y))
 
