@@ -144,6 +144,7 @@ def apply_feature_select(splits, threshold="mean"):
     xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
     train_model(xtc, train_x, train_y)
     print("Max Feature importance:",max(xtc.feature_importances_))
+    print("Min Feature importance:",min(xtc.feature_importances_))
 
     feat_sel = feature_selection.SelectFromModel(xtc, prefit=True, threshold="median")
     print("Before feature selection:",train_x.shape)
@@ -180,11 +181,12 @@ def main():
     print(n_samples, n_features, n_classes)
 
     print("Running classification tests...")
-    warnings.filterwarnings('ignore')
+    #warnings.filterwarnings('ignore')
     # test kd-tree model before PCA
     #ncc = neighbors.NearestCentroid()
     #train_test("Before PCA: Nearest Centroid", ncc, splits)
     # test Random Forest model
+    '''
     rfc = ensemble.RandomForestClassifier()
     train_test("Initial: Random Forest", rfc, splits)
     rfc = ensemble.RandomForestClassifier(criterion="entropy")
@@ -192,7 +194,6 @@ def main():
     xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
     train_test("Initial: Extra Trees", xtc, splits)
 
-    '''
     # scale
     scaler = preprocessing.QuantileTransformer()
     train_x = scaler.fit_transform(train_x)
@@ -203,10 +204,10 @@ def main():
     # apply reduction
     splits = apply_reduction(splits, eps=0.99)
 
-    rfc = ensemble.RandomForestClassifier()
-    train_test("after reduction: Random Forest", rfc, splits)
-    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    train_test("Extra Trees", xtc, splits)
+    #rfc = ensemble.RandomForestClassifier()
+    #train_test("after reduction: Random Forest", rfc, splits)
+    #xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
+    #train_test("Extra Trees", xtc, splits)
 
     # feature selection
     splits = apply_feature_select(splits)
@@ -236,6 +237,8 @@ def main():
     # feature selection
     splits = apply_feature_select(splits)
     '''
+    #splits = apply_feature_select(splits)
+    #splits = apply_feature_select(splits)
 
 
     train_x, train_y, test_x, test_y = splits

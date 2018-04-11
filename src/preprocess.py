@@ -256,7 +256,13 @@ def process_inkml(fn, gt_df):
     scaled_mp_angle_pts = scale_angle_pts(mp_angle_pts, n_bins)
 
 
-    im_arr.extend((r_angle_bins, a_angle_bins, dist_bins, mp_dist_bins, scaled_angle_pts, scaled_mp_angle_pts, fn, sfn, symbol, ar, ad, len(traces)))
+    im_arr.extend(r_angle_bins)
+    im_arr.extend(a_angle_bins)
+    im_arr.extend(dist_bins)
+    im_arr.extend(mp_dist_bins)
+    im_arr.extend(scaled_angle_pts)
+    im_arr.extend(scaled_mp_angle_pts)
+    im_arr.extend((fn, sfn, symbol, ar, ad, len(traces)))
     return im_arr
 
 

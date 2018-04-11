@@ -24,10 +24,10 @@ def get_splits(data, ratio, train_p, total_p):
         col_list.remove(c)
 
     train_x = pd.DataFrame(train[col_list])
-    train_y = pd.DataFrame(train['symbol'])
+    train_y = train['symbol']
 
     test_x = pd.DataFrame(test[col_list])
-    test_y = pd.DataFrame(test['symbol'])
+    test_y = test['symbol']
 
     return train_x, train_y, test_x, test_y
 
