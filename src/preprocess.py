@@ -40,109 +40,83 @@ def calc_scale_fn(pts):
     y_offset = (max_range-y_range)/2-min_y
 
     # scale point
+    scale_pt = lambda p: scale(p[0], p[1])
     scale = lambda x,y: ( \
             scale_factor*(x+x_offset), \
             scale_factor*(y+y_offset))
 
-    return scale, y_range/(x_range+1)
+    return scale_pt, y_range/(x_range+1)
 
 
 # convert traces into (id, coordinate list) pairs
 def process_traces(ts):
-    to_id_trace = lambda t: (t['id'].replace('"',''), process_trace_str(t.string))
-    id_traces = [ to_id_trace(t) for t in ts]
+    get_trace_id = lambda t: int(t['id'].replace('"',''))
+    get_trace_pts = lambda t: process_trace_str(t.string)
+    id_traces = { get_trace_id(t): get_trace_pts(t) for t in ts}
+    trace_ids = list(id_traces.keys())
+    trace_ids.sort()
 
     # collect points from all traces
     pts = []
-    for t in id_traces:
-        pts.extend(t[1])
-
-    # scaling function
-    scale, ar = calc_scale_fn(pts)
-
-    for id_t in id_traces:
-        # scale each point in the trace
-        for i in range(len(id_t[1])):
-            pt = id_t[1][i]
-
-            id_t[1][i] = scale(pt[0],pt[1])
-
-    midpoint = lambda a,b: ( \
-            (a[0]+b[0])/2, \
-            (a[1]+b[1])/2)
+    for tid in trace_ids:
+        pts.extend( id_traces[tid] )
 
     e_dist = lambda a,b: (\
             (a[0]-b[0])**2 + \
             (a[1]-b[1])**2)**(1/2)
 
+    # compute the total length of the strokes in the symbol
+    total_symbol_length = 0
+    for i in range(1,len(pts)):
+        total_symbol_length += e_dist(pts[i], pts[i-1])
+
+    # scaling function
+    scale, ar = calc_scale_fn(pts)
+
+    # scale each point
+    for i in range(len(pts)):
+        pts[i] = scale(pts[i])
+
+    midpoint = lambda a,b: ( \
+            (a[0]+b[0])/2, \
+            (a[1]+b[1])/2)
+
+    # convert to midpoints
+    for i in range(len(pts)-1):
+        pts[i] = midpoint(pts[i],pts[i+1])
+
+    '''
+    sz = 1000
+    im = Image.new('1', (sz,sz))
+    draw = ImageDraw.Draw(im)
+    sv = IMG_SIZE/sz
+    width = round(1/sz)
+    draw.line(pts, fill=128, width=width)
+    #im.save("my_symbol.bmp")
+    '''
+
     angle = lambda a,b: (\
             math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
 
-    dists = []
-    mp_dists = []
-    r_angles = []
-    a_angles = []
-    angle_pts = []
-    mp_angle_pts = []
-    for id_t in id_traces:
-        trace = id_t[1]
-        n_pts = len(trace)
-        midpoints = [None]*n_pts
-        e_dists = [0]*n_pts
-        mpe_dists = [0]*n_pts
-        abs_angles = [0]*n_pts
-        angles = [0]*n_pts
-        mp_angles = [0]*n_pts
-        d_angles = [None]*n_pts
-        dmp_angles = [None]*n_pts
+    n_pts = len(pts)
+    r_angles = [0]*n_pts
+    a_angles = [0]*n_pts
+    dists = [0]*n_pts
+    for i in range(0, n_pts-1):
+        pass
+        # absolute angles
+        a_angles[i] = angle(pts[i], pts[i-1])
 
-        # calc midpoints of consecutive points in the trace
-        midpoints[0] = trace[0]
-        d_angles[0] = tuple((0,0))
-        dmp_angles[0] = tuple((0,0))
-        for i in range(1,n_pts):
-            last_pt = trace[i-1]
-            pt = trace[i]
+        # relative angles
+        r_angles[i] = a_angles[i] - a_angles[i-1]
 
-            # distance
-            e_dists[i] = e_dist(last_pt, pt)
-
-            # midpoint
-            midpoints[i] = midpoint(last_pt, pt)
-            # midpoint distance
-            mpe_dists[i] = e_dist(midpoints[i], midpoints[i-1])
-            # absolute angles
-            abs_angles[i] = angle(pt, last_pt)
-
-            # relative angles
-            angles[i] = angle(pt, last_pt) - angles[i-1]
-            # relative angles for midpoints
-            mp_angles[i] = angle(midpoints[i], midpoints[i-1]) - mp_angles[i-1]
-
-            # total distance
-            t_dist = d_angles[i-1][0] + e_dists[i]
-            # (total distance, relative angle)
-            d_angles[i] = tuple((t_dist, angles[i]))
-
-            # total midpoint distance
-            tmp_dist = dmp_angles[i-1][0] + mpe_dists[i]
-            # (total midpoint distance, relative midpoint angle)
-            dmp_angles[i] = tuple((tmp_dist,mp_angles[i]))
-
-        id_t[1].clear()
-        id_t[1].extend(midpoints)
-        dists.extend(e_dists)
-        mp_dists.extend(mpe_dists)
-        a_angles.extend(abs_angles)
-        r_angles.extend(angles)
-        angle_pts.extend(d_angles)
-        mp_angle_pts.extend(dmp_angles)
-
+        # distance
+        dists[i] = e_dist(pts[i], pts[i-1])
 
     # average distance between points
-    ad = sum(e_dists)/len(e_dists)
+    avg_dist = sum(dists)/len(dists)
 
-    return id_traces, ar, ad, r_angles, a_angles, angle_pts, mp_angle_pts, dists, mp_dists
+    return pts, a_angles, r_angles, avg_dist, ar, len(trace_ids)
 
 
 # convert filename of xml file to beautiful soup object
@@ -186,20 +160,8 @@ def process_inkml(fn, gt_df):
     symbol = get_GT_symbol(sfn, gt_df)
     #print(fn,":",sfn,":", symbol)
 
-    '''
-    traces: processed traces
-    ar: "aspect ratio"
-    ad: average distance between points
-    r_angles: relative angles
-    a_angles: absolute angles
-    angle_pts: (total distance, relative angle) pairs
-    mp_angle_pts: (total midpoint distance, relative midpoint angle) pairs
-    dists: distances
-    mp_dists: midpoint distances
-    '''
-    traces, ar, ad, r_angles, a_angles, \
-            angle_pts, mp_angle_pts, dists, mp_dists \
-            = process_traces(soup.find_all('trace'))
+    pts, a_angles, r_angles, avg_dist, ar, n_traces = \
+            process_traces(soup.find_all('trace'))
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
@@ -210,14 +172,8 @@ def process_inkml(fn, gt_df):
         draw = ImageDraw.Draw(im)
         sv = IMG_SIZE/sz
         width = round(1/sz)
-        for t in traces:
-            last = None
-            for c in t[1]:
-                scaled = scale(c,sv)
-                if None != last:
-                    last.extend(scaled)
-                    draw.line(last, fill=128, width=width)
-                last = list(scaled)
+        s_pts = [scale(p,sv) for p in pts]
+        draw.line(s_pts, fill=128, width=width)
         #im.save(fn+str(sz)+".bmp")
         im_arr.extend(np.array(im).flatten().tolist())
 
@@ -233,36 +189,9 @@ def process_inkml(fn, gt_df):
         ind = round(n_bins*(a%360)/360)%n_bins
         a_angle_bins[ind] += 1
 
-    # bin distances and midpoint distances
-    n_bins = 8
-    max_dist = max(max(dists),1)
-    dist_bins = [0]*n_bins
-    for d in dists:
-        ind = round(n_bins*(d/max_dist))%n_bins
-        dist_bins[ind] += 1
-
-    max_dist = max(max(mp_dists),1)
-    mp_dist_bins = [0]*n_bins
-    for d in mp_dists:
-        ind = round(n_bins*(d/max_dist))%n_bins
-        mp_dist_bins[ind] += 1
-
-    # bin angle points
-    n_bins = 30
-    scaled_angle_pts = scale_angle_pts(angle_pts, n_bins)
-
-    # bin mp angle points
-    n_bins = 30
-    scaled_mp_angle_pts = scale_angle_pts(mp_angle_pts, n_bins)
-
-
     im_arr.extend(r_angle_bins)
     im_arr.extend(a_angle_bins)
-    im_arr.extend(dist_bins)
-    im_arr.extend(mp_dist_bins)
-    im_arr.extend(scaled_angle_pts)
-    im_arr.extend(scaled_mp_angle_pts)
-    im_arr.extend((fn, sfn, symbol, ar, ad, len(traces)))
+    im_arr.extend((fn, sfn, symbol, ar, avg_dist, n_traces))
     return im_arr
 
 
@@ -273,7 +202,6 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
-    data = pd.DataFrame()
     columns= ["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces"]
     to_process = glob(os.path.join(fdir, "*.inkml"))
     n_to_process = len(to_process)
@@ -283,9 +211,11 @@ def preprocess_dir(fdir, gt_df):
         n_done += 1
         p_done = n_done/n_to_process
         p20 = round(p_done*20)
-        print("\r[{0}] {2}/{3} ({1}%) {4}".format('#'*p20+' '*(20-p20), round(p_done*100), n_done, n_to_process, os.path.basename(f)), end='', flush=True)
+        print("\r[{0}] {2}/{3} ({1}%) {4}".format( \
+                '#'*p20+' '*(20-p20), round(p_done*100), \
+                n_done, n_to_process, os.path.basename(f)), \
+                end='', flush=True)
 
-    print("\nPerforming additional preprocessing...")
     data = pd.DataFrame(processed)
     lc = len(columns)
     ldc = len(data.columns)
