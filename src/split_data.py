@@ -1,6 +1,4 @@
-import numpy as np
 import pandas as pd
-import random as r
 
 
 def split_data(data, ratio):
@@ -29,7 +27,8 @@ def get_splits(data, ratio, train_p, total_p):
     test_x = pd.DataFrame(test[col_list])
     test_y = test['symbol']
 
-    return train_x, train_y, test_x, test_y
+    return {'train_x': train_x, 'train_y': train_y, \
+            'test_x': test_x, 'test_y': test_y}
 
 
 def main():
