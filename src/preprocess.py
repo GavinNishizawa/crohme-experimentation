@@ -59,6 +59,12 @@ def process_traces(ts):
     for tid in trace_ids:
         pts.extend( id_traces[tid] )
 
+    p_data = process_pts(pts)
+    p_data.append(len(trace_ids))
+    return p_data
+
+
+def process_pts(pts):
     e_dist = lambda a,b: (\
             (a[0]-b[0])**2 + \
             (a[1]-b[1])**2)**(1/2)
@@ -105,8 +111,10 @@ def process_traces(ts):
     r_angles = [0]*n_pts
     a_angles = [0]*n_pts
     dists = [0]*n_pts
-    daa_pts = [0]*n_pts
-    for i in range(0, n_pts-1):
+    c_dists = [0]*n_pts
+    daa_pts = [None]*n_pts
+    daa_pts[0] = (0,0)
+    for i in range(1, n_pts):
         # absolute angles
         a_angles[i] = angle(pts[i], pts[i-1])
 
@@ -116,14 +124,25 @@ def process_traces(ts):
         # distance
         dists[i] = e_dist(pts[i], pts[i-1])
 
-        # (total scaled distance, abs angle) pts
-        daa_pts[i] = (dists[i]/(total_sym_len+1), \
+        # cumulative distance
+        c_dists[i] = dists[i] + c_dists[i-1]
+
+        # (IMG_SIZE * scaled distance, abs angle) pts
+        daa_pts[i] = ( \
+                IMG_SIZE*c_dists[i]/(total_sym_len+1), \
                 a_angles[i])
+
+    # scaling function
+    daa_scale, daa_ar = calc_scale_fn(daa_pts)
+
+    # scale each daa point
+    for i in range(len(daa_pts)):
+        daa_pts[i] = daa_scale(daa_pts[i])
 
     # average distance between points
     avg_dist = sum(dists)/len(dists)
 
-    return pts, a_angles, r_angles, daa_pts, avg_dist, ar, len(trace_ids), total_sym_len
+    return [pts, a_angles, r_angles, daa_pts, avg_dist, ar, total_sym_len]
 
 
 # convert filename of xml file to beautiful soup object
@@ -198,7 +217,7 @@ def process_inkml(fn, gt_df):
     #print(fn,":",sfn,":", symbol)
 
     pts, a_angles, r_angles, daa_pts, avg_dist, ar, \
-            n_traces, total_sym_len = \
+            total_sym_len, n_traces = \
             process_traces(soup.find_all('trace'))
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
@@ -217,6 +236,17 @@ def process_inkml(fn, gt_df):
         #im.save(fn+str(sz)+".bmp")
         im_arr.extend(np.array(im).flatten().tolist())
     #'''
+
+    # distance angle points => image
+    img_sizes = [7,13,21]
+    for sz in img_sizes:
+        im = Image.new('1', (sz,sz))
+        draw = ImageDraw.Draw(im)
+        sv = IMG_SIZE/sz
+        width = round(1/sz)
+        s_pts = [scale(p,sv) for p in daa_pts]
+        draw.line(s_pts, fill=128, width=width)
+        im_arr.extend(np.array(im).flatten().tolist())
 
     # bin relative and absolute angles
     bin_sizes = [2,3,4,6,8,16,32]

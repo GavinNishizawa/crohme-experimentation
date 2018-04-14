@@ -316,7 +316,7 @@ def main():
     '''
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.99, threshold="mean")
+    splits = apply_drfs(splits, load=False, eps=0.99, threshold="0.5*median")
 
     n_samples, n_features, n_classes = get_counts(splits)
 
