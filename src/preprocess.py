@@ -64,9 +64,9 @@ def process_traces(ts):
             (a[1]-b[1])**2)**(1/2)
 
     # compute the total length of the strokes in the symbol
-    total_symbol_length = 0
+    total_sym_len = 0
     for i in range(1,len(pts)):
-        total_symbol_length += e_dist(pts[i], pts[i-1])
+        total_sym_len += e_dist(pts[i], pts[i-1])
 
     # scaling function
     scale, ar = calc_scale_fn(pts)
@@ -74,6 +74,11 @@ def process_traces(ts):
     # scale each point
     for i in range(len(pts)):
         pts[i] = scale(pts[i])
+
+    # compute the total length of the strokes in the symbol
+    total_sym_len = 0
+    for i in range(1,len(pts)):
+        total_sym_len += e_dist(pts[i], pts[i-1])
 
     midpoint = lambda a,b: ( \
             (a[0]+b[0])/2, \
@@ -100,6 +105,7 @@ def process_traces(ts):
     r_angles = [0]*n_pts
     a_angles = [0]*n_pts
     dists = [0]*n_pts
+    daa_pts = [0]*n_pts
     for i in range(0, n_pts-1):
         # absolute angles
         a_angles[i] = angle(pts[i], pts[i-1])
@@ -110,10 +116,14 @@ def process_traces(ts):
         # distance
         dists[i] = e_dist(pts[i], pts[i-1])
 
+        # (total scaled distance, abs angle) pts
+        daa_pts[i] = (dists[i]/(total_sym_len+1), \
+                a_angles[i])
+
     # average distance between points
     avg_dist = sum(dists)/len(dists)
 
-    return pts, a_angles, r_angles, avg_dist, ar, len(trace_ids)
+    return pts, a_angles, r_angles, daa_pts, avg_dist, ar, len(trace_ids), total_sym_len
 
 
 # convert filename of xml file to beautiful soup object
@@ -172,6 +182,11 @@ def bin_angles(angles, n_bins=8):
         ind = get_bin_ind(a_o_b, n_bins)
         angle_bins[ind] += 1
 
+    total_binned = sum(angle_bins) + 1
+
+    # scale bin counts by number of total angles
+    angle_bins = [ n/total_binned for n in angle_bins]
+
     return angle_bins
 
 
@@ -182,7 +197,8 @@ def process_inkml(fn, gt_df):
     symbol = get_GT_symbol(sfn, gt_df)
     #print(fn,":",sfn,":", symbol)
 
-    pts, a_angles, r_angles, avg_dist, ar, n_traces = \
+    pts, a_angles, r_angles, daa_pts, avg_dist, ar, \
+            n_traces, total_sym_len = \
             process_traces(soup.find_all('trace'))
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
@@ -210,7 +226,8 @@ def process_inkml(fn, gt_df):
         im_arr.extend(bin_angles( \
                 a_angles, n_bins))
 
-    im_arr.extend((fn, sfn, symbol, ar, avg_dist, n_traces))
+    im_arr.extend((fn, sfn, symbol, ar, \
+            avg_dist, n_traces, total_sym_len))
     return im_arr
 
 
@@ -221,7 +238,7 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
-    columns= ["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces"]
+    columns= ["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces", "total_sym_len"]
     to_process = glob(os.path.join(fdir, "*.inkml"))
     n_to_process = len(to_process)
     n_done = 0
