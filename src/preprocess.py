@@ -10,8 +10,6 @@ from PIL import Image, ImageDraw, ImageFilter
 from bs4 import BeautifulSoup
 
 IMG_SIZE=1000
-SM_IMG_SIZE=3
-IMG_SIZES=[3,5,7,10,13,21]
 
 
 # convert trace string to a list of coordinates
@@ -103,7 +101,6 @@ def process_traces(ts):
     a_angles = [0]*n_pts
     dists = [0]*n_pts
     for i in range(0, n_pts-1):
-        pass
         # absolute angles
         a_angles[i] = angle(pts[i], pts[i-1])
 
@@ -153,6 +150,31 @@ def scale_angle_pts(pts, n_bins):
     return saps
 
 
+def bin_angles(angles, n_bins=8):
+    get_bin_ind = lambda a,n: round(n*(a%360)/360)%n
+    bin_size = (360/n_bins)/3
+
+    angle_bins = [0]*n_bins
+    for a in angles:
+        # index of bin for angle
+        ind = get_bin_ind(a, n_bins)
+        angle_bins[ind] += 1
+
+        # index of bin for angle with offset
+        # forwards of 1/3 the bin size
+        a_o_f = a + bin_size
+        ind = get_bin_ind(a_o_f, n_bins)
+        angle_bins[ind] += 1
+
+        # index of bin for angle with offset
+        # backwards of 1/3 the bin size
+        a_o_b = a - bin_size
+        ind = get_bin_ind(a_o_b, n_bins)
+        angle_bins[ind] += 1
+
+    return angle_bins
+
+
 def process_inkml(fn, gt_df):
     soup = xml_to_soup(fn)
 
@@ -167,7 +189,9 @@ def process_inkml(fn, gt_df):
 
     # draw image from traces at different scales
     im_arr = []
-    for sz in IMG_SIZES:
+    #''' Testing without image data
+    img_sizes = [3,5,7,10,13,21]
+    for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
         sv = IMG_SIZE/sz
@@ -176,21 +200,16 @@ def process_inkml(fn, gt_df):
         draw.line(s_pts, fill=128, width=width)
         #im.save(fn+str(sz)+".bmp")
         im_arr.extend(np.array(im).flatten().tolist())
+    #'''
 
     # bin relative and absolute angles
-    n_bins = 8
-    r_angle_bins = [0]*n_bins
-    for a in r_angles:
-        ind = round(n_bins*(a%360)/360)%n_bins
-        r_angle_bins[ind] += 1
+    bin_sizes = [2,3,4,6,8,16,32]
+    for n_bins in bin_sizes:
+        im_arr.extend(bin_angles( \
+                r_angles, n_bins))
+        im_arr.extend(bin_angles( \
+                a_angles, n_bins))
 
-    a_angle_bins = [0]*n_bins
-    for a in a_angles:
-        ind = round(n_bins*(a%360)/360)%n_bins
-        a_angle_bins[ind] += 1
-
-    im_arr.extend(r_angle_bins)
-    im_arr.extend(a_angle_bins)
     im_arr.extend((fn, sfn, symbol, ar, avg_dist, n_traces))
     return im_arr
 
@@ -216,6 +235,7 @@ def preprocess_dir(fdir, gt_df):
                 n_done, n_to_process, os.path.basename(f)), \
                 end='', flush=True)
 
+    print("\nPerforming additional preprocessing...")
     data = pd.DataFrame(processed)
     lc = len(columns)
     ldc = len(data.columns)
