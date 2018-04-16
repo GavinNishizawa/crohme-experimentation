@@ -33,7 +33,7 @@ def get_data(gt_fn, dir_fn):
 
 
 def print_results(name, predict, ys):
-    print(name)
+    #print(name)
     warnings.filterwarnings('ignore')
     print("\tPrecision: %f, Recall: %f, f1-score: %f" % \
             metrics.precision_recall_fscore_support( \
@@ -149,8 +149,26 @@ def my_test_model(name, model, test_x, test_y):
 
 
 def train_test(name, model, splits):
+    print("\nTraining:",name,"..")
+    start_train = time.time()
     my_train_model(model, splits['train_x'], splits['train_y'])
-    return my_test_model(name, model, splits['test_x'], splits['test_y'])
+    print_time(start_train, time.time())
+
+    print("Testing:",name,"..")
+    start_test = time.time()
+    results = my_test_model(name, model, splits['test_x'], splits['test_y'])
+    print_time(start_test, time.time())
+
+    return results
+
+
+def test_on_train(name, model, splits):
+    print("Testing on training data:",name,"..")
+    start_test = time.time()
+    results = my_test_model(name, model, splits['train_x'], splits['train_y'])
+    print_time(start_test, time.time())
+
+    return results
 
 
 def get_counts(splits):
@@ -238,6 +256,11 @@ def apply_drfs(splits, typ='drfs_model_train', load=True, eps=0.5, threshold="me
     return splits
 
 
+def print_time(start,end):
+    elapsed = end-start
+    print('\tTime: %d m %2d s' % (elapsed/60, elapsed%60))
+
+
 def main():
     args = parse_args()
     ratio = args.ratio
@@ -254,27 +277,29 @@ def main():
     # save/load data split
     split_fn = "split"+str(ratio)+str(train_p)+str(total_p) + os.path.basename(args.fdir)
 
-    splits = load_obj(split_fn)
+    load = False
+    splits = None
+    if load:
+        splits = load_obj(split_fn)
     if splits == None:
         splits = get_splits(data, ratio, train_p, total_p)
-        save_obj(split_fn, splits)
+        if load:
+            save_obj(split_fn, splits)
 
     n_samples, n_features, n_classes = get_counts(splits)
     print(n_samples, n_features, n_classes)
 
     print("Running classification tests...")
-    # test kd-tree model before PCA
-    #ncc = neighbors.NearestCentroid()
-    #train_test("Before PCA: Nearest Centroid", ncc, splits)
-    # test Random Forest model
     '''
+    name = "Nearest Centroid"
+    ncc = neighbors.NearestCentroid()
+    train_test(name, ncc, splits)
+    test_on_train(name, ncc, splits)
+    # test Random Forest model
     rfc = ensemble.RandomForestClassifier()
     train_test("Initial: Random Forest", rfc, splits)
     rfc = ensemble.RandomForestClassifier(criterion="entropy")
     train_test("Initial: Random Forest (entropy)", rfc, splits)
-    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    train_test("Initial: Extra Trees", xtc, splits)
-
     # scale
     scaler = preprocessing.QuantileTransformer()
     train_x = scaler.fit_transform(train_x)
@@ -283,52 +308,33 @@ def main():
 
     # add k means data as features (seems to reduce accuracy)
     #splits = apply_kmeans(splits)
-
-    # apply reduction
-    #splits = apply_reduction(splits, eps=0.99)
-
-    #rfc = ensemble.RandomForestClassifier()
-    #train_test("after reduction: Random Forest", rfc, splits)
-    #xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    #train_test("Extra Trees", xtc, splits)
-
-    # feature selection
-    #splits = apply_feature_select(splits)
-
-    rfc = ensemble.RandomForestClassifier()
-    train_test("After feature select: Random Forest", rfc, splits)
-    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    train_test("Extra Trees", xtc, splits)
-
-    rfc = ensemble.RandomForestClassifier()
-    train_test("after cluster data: Random Forest", rfc, splits)
-    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    train_test("Extra Trees", xtc, splits)
-
-    rfc = ensemble.RandomForestClassifier()
-    train_test("after reduction: Random Forest", rfc, splits)
-    xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    train_test("Extra Trees", xtc, splits)
-
-    # feature selection
-    #splits = apply_feature_select(splits)
-    #splits = apply_feature_select(splits)
-    #splits = apply_feature_select(splits)
     '''
 
+    name = "Extra Trees (50)"
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=50, n_jobs=-1)
-    train_test("Extra Trees (50)", xtc, splits)
+    train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
+
+    '''
+    name = "Extra Trees (50) max depth 30"
+    xtc = ensemble.ExtraTreesClassifier( \
+            n_estimators=50, max_depth=30, n_jobs=-1)
+    train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
+    '''
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.3, threshold="mean")
+    splits = apply_drfs(splits, load=False, eps=0.999, threshold=0.005)
 
     n_samples, n_features, n_classes = get_counts(splits)
 
-    #ncc = neighbors.NearestCentroid()
-    #train_test("Nearest Centroid", ncc, splits)
-
     '''
+    name = "Nearest Centroid"
+    ncc = neighbors.NearestCentroid()
+    train_test(name, ncc, splits)
+    test_on_train(name, ncc, splits)
+
     # test Random Forest model
     rfc = ensemble.RandomForestClassifier()
     train_test("Random Forest", rfc, splits)
@@ -344,21 +350,48 @@ def main():
     train_test("Ada Boosted RF", abc, splits)
     '''
 
+    name = "Extra Trees"
     xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
-    train_test("Extra Trees", xtc, splits)
+    train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
 
+    name = "Extra Trees (50)"
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=50, n_jobs=-1)
-    train_test("Extra Trees (50)", xtc, splits)
-
-    xtc = ensemble.ExtraTreesClassifier( \
-            n_estimators=100, n_jobs=-1)
-    train_test("Extra Trees (100)", xtc, splits)
-
-    svmm = svm.SVC(C=100.0, gamma='auto', tol=0.1, probability=False)
-    train_test("SVM C=100.0, gamma=auto, uniform weights", svmm, splits)
+    train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
 
     '''
+    name = "Extra Trees (50) max depth 30"
+    xtc = ensemble.ExtraTreesClassifier( \
+            n_estimators=50, max_depth=30, n_jobs=-1)
+    train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
+
+    # test Ada Boost model
+    name = "Ada Boosted Extra Trees (50) max depth 21"
+    abc = ensemble.AdaBoostClassifier(xtc, n_estimators=3)
+    train_test(name, abc, splits)
+    #test_on_train(name, abc, splits)
+    '''
+
+    name = "Extra Trees (100)"
+    xtc = ensemble.ExtraTreesClassifier( \
+            n_estimators=100, n_jobs=-1)
+    train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
+
+    name = "SVM C=50.0, gamma=auto, uniform weights"
+    svmm = svm.SVC(C=50.0, gamma='auto', tol=0.000001, probability=True)
+    train_test(name, svmm, splits)
+    test_on_train(name, svmm, splits)
+
+    '''
+    name = "SVM C=100.0, gamma=auto, uniform weights"
+    svmm = svm.SVC(C=100.0, gamma='auto', tol=0.000001, probability=True)
+    train_test(name, svmm, splits)
+    test_on_train(name, svmm, splits)
+
     # test SVM models
     m_name = "SVM C=100.0, gamma=auto"
     svmm = load_obj(m_name)
@@ -378,15 +411,10 @@ def main():
 
     svmm = svm.LinearSVC(dual=False)
     train_test("LinearSVC", svmm, splits)
-
-    #svmm = svm.LinearSVC(penalty='l1', dual=False)
-    #train_test("LinearSVC l1", svmm, splits)
     '''
 
-    #print(metrics.classification_report(prs, test_y))
-
-    elapsed = time.time()-start_time
-    print('\nTime: %d m %2d s' % (elapsed/60, elapsed%60))
+    print("\nTests complete!")
+    print_time(start_time, time.time())
 
 
 if __name__=="__main__":
