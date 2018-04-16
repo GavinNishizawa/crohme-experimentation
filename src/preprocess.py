@@ -233,12 +233,19 @@ def process_inkml(fn, gt_df):
         width = round(1/sz)
         s_pts = [scale(p,sv) for p in pts]
         draw.line(s_pts, fill=128, width=width)
+        im_df = pd.DataFrame(np.array(im))
+
+        # project counts on x axis
+        im_arr.extend(im_df.apply(sum))
+        # project counts on y axis
+        im_arr.extend(im_df.apply(sum,axis=1))
+
         #im.save(fn+str(sz)+".bmp")
         im_arr.extend(np.array(im).flatten().tolist())
     #'''
 
-    # distance angle points => image
-    img_sizes = [7,13,21]
+    #'''
+    img_sizes = [3,5,7,10,13,21]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
@@ -247,7 +254,15 @@ def process_inkml(fn, gt_df):
         s_pts = [scale(p,sv) for p in daa_pts]
         draw.line(s_pts, fill=128, width=width)
         im_arr.extend(np.array(im).flatten().tolist())
+        im_df = pd.DataFrame(np.array(im))
 
+        # project counts on x axis
+        im_arr.extend(im_df.apply(sum))
+        # project counts on y axis
+        im_arr.extend(im_df.apply(sum,axis=1))
+    #'''
+
+    #''' Testing without angle data
     # bin relative and absolute angles
     bin_sizes = [2,3,4,6,8,16,32]
     for n_bins in bin_sizes:
@@ -255,6 +270,7 @@ def process_inkml(fn, gt_df):
                 r_angles, n_bins))
         im_arr.extend(bin_angles( \
                 a_angles, n_bins))
+    #'''
 
     im_arr.extend((fn, sfn, symbol, ar, \
             avg_dist, n_traces, total_sym_len))

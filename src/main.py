@@ -219,8 +219,9 @@ def apply_drfs(splits, typ='drfs_model_train', load=True, eps=0.5, threshold="me
     if drfs_pipe is None:
         drfs_pipe = train_drfs(splits['train_x'],  \
                 splits['train_y'], eps, threshold)
-        # pickle model for the future
-        save_obj(typ, drfs_pipe)
+        if load:
+            # pickle model for the future
+            save_obj(typ, drfs_pipe)
 
     n_samples, n_features, n_classes = get_counts(splits)
     print("Before:",n_samples, n_features, n_classes)
@@ -315,8 +316,12 @@ def main():
     #splits = apply_feature_select(splits)
     '''
 
+    xtc = ensemble.ExtraTreesClassifier( \
+            n_estimators=50, n_jobs=-1)
+    train_test("Extra Trees (50)", xtc, splits)
+
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.99, threshold="0.5*median")
+    splits = apply_drfs(splits, load=False, eps=0.3, threshold="mean")
 
     n_samples, n_features, n_classes = get_counts(splits)
 
