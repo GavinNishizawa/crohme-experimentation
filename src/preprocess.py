@@ -258,26 +258,11 @@ def extract_features(traces):
     return feat_arr
 
 
-def process_inkml(fn, gt_df):
-    soup = xml_to_soup(fn)
-
-    sfn = get_soup_fn(soup)
-    symbol = get_GT_symbol(sfn, gt_df)
-    #print(fn,":",sfn,":", symbol)
-
-    # convert traces into (id, coordinate list) pairs
-    ts = soup.find_all('trace')
-
-    get_trace_id = lambda t: int(t['id'].replace('"',''))
-    get_trace_pts = lambda t: process_trace_str(t.string)
-    id_traces = { get_trace_id(t): get_trace_pts(t) for t in ts}
-    trace_ids = list(id_traces.keys())
-    trace_ids.sort()
-
+def process_traces(traces):
     # collect points from all traces
     pts = []
-    for tid in trace_ids:
-        pts.extend( id_traces[tid] )
+    for t in traces:
+        pts.extend(t)
 
     # calculate symbol width and height in original space
     df_pts = pd.DataFrame(np.array(pts))
@@ -302,8 +287,8 @@ def process_inkml(fn, gt_df):
 
     s_traces = []
     total_pts = 0
-    for tid in trace_ids:
-        t_len = len(id_traces[tid])
+    for t in traces:
+        t_len = len(t)
         # scaled points for this trace
         s_traces.append( \
                 pts[total_pts:(total_pts+t_len)])
@@ -338,9 +323,30 @@ def process_inkml(fn, gt_df):
 
     feat_arr = extract_features(s_traces)
 
-    n_traces = len(trace_ids)
-    feat_arr.extend((fn, sfn, symbol, ar, n_traces, \
-            width, height))
+    feat_arr.extend((ar, len(traces), width, height))
+    return feat_arr
+
+
+def process_inkml(fn, gt_df):
+    soup = xml_to_soup(fn)
+
+    sfn = get_soup_fn(soup)
+    symbol = get_GT_symbol(sfn, gt_df)
+    #print(fn,":",sfn,":", symbol)
+
+    # convert traces into (id, coordinate list) pairs
+    ts = soup.find_all('trace')
+
+    get_trace_id = lambda t: int(t['id'].replace('"',''))
+    get_trace_pts = lambda t: process_trace_str(t.string)
+    id_traces = { get_trace_id(t): get_trace_pts(t) for t in ts}
+    trace_ids = list(id_traces.keys())
+    trace_ids.sort()
+
+    traces = [id_traces[k] for k in trace_ids]
+    feat_arr = process_traces(traces)
+
+    feat_arr.extend((fn, sfn, symbol))
     return feat_arr
 
 
@@ -351,8 +357,8 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
-    columns= ["fn","symbol_fn","symbol","aspect","n_traces", \
-            "width","height"]
+    columns= ["aspect","n_traces","width","height", \
+            "fn","symbol_fn","symbol"]
     to_process = glob(os.path.join(fdir, "*.inkml"))
     n_to_process = len(to_process)
     n_done = 0
