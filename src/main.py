@@ -314,7 +314,7 @@ def main():
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=50, n_jobs=-1)
     train_test(name, xtc, splits)
-    test_on_train(name, xtc, splits)
+    #test_on_train(name, xtc, splits)
 
     '''
     name = "Extra Trees (50) max depth 30"
@@ -325,7 +325,7 @@ def main():
     '''
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.999, threshold=0.005)
+    splits = apply_drfs(splits, load=False, eps=0.99, threshold=0.005)
 
     n_samples, n_features, n_classes = get_counts(splits)
 
@@ -353,13 +353,13 @@ def main():
     name = "Extra Trees"
     xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
     train_test(name, xtc, splits)
-    test_on_train(name, xtc, splits)
+    #test_on_train(name, xtc, splits)
 
     name = "Extra Trees (50)"
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=50, n_jobs=-1)
     train_test(name, xtc, splits)
-    test_on_train(name, xtc, splits)
+    #test_on_train(name, xtc, splits)
 
     '''
     name = "Extra Trees (50) max depth 30"
@@ -379,12 +379,12 @@ def main():
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=100, n_jobs=-1)
     train_test(name, xtc, splits)
-    test_on_train(name, xtc, splits)
+    #test_on_train(name, xtc, splits)
 
     name = "SVM C=50.0, gamma=auto, uniform weights"
     svmm = svm.SVC(C=50.0, gamma='auto', tol=0.000001, probability=True)
     train_test(name, svmm, splits)
-    test_on_train(name, svmm, splits)
+    #test_on_train(name, svmm, splits)
 
     '''
     name = "SVM C=100.0, gamma=auto, uniform weights"

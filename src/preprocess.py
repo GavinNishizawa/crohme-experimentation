@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFilter
 from bs4 import BeautifulSoup
 
 IMG_SIZE=1000
+MED_IMG_SZ=10
 
 
 # convert trace string to a list of coordinates
@@ -86,6 +87,7 @@ def process_pts(pts):
     for i in range(1,len(pts)):
         total_sym_len += e_dist(pts[i], pts[i-1])
 
+    '''
     midpoint = lambda a,b: ( \
             (a[0]+b[0])/2, \
             (a[1]+b[1])/2)
@@ -93,6 +95,15 @@ def process_pts(pts):
     # convert to midpoints
     for i in range(len(pts)-1):
         pts[i] = midpoint(pts[i],pts[i+1])
+    '''
+
+    midpoint3 = lambda a,b,c: ( \
+            (a[0]+b[0]+c[0])/3, \
+            (a[1]+b[1]+c[1])/3)
+
+    # convert to midpoints
+    for i in range(len(pts)-2):
+        pts[i] = midpoint3(pts[i],pts[i+1],pts[i+2])
 
     '''
     sz = 1000
@@ -222,10 +233,11 @@ def process_inkml(fn, gt_df):
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
+    # add first and last points
+    feat_arr = [pts[0][0],pts[0][1],pts[-1][0],pts[-1][1]]
     # draw image from traces at different scales
-    im_arr = []
     #''' Testing without image data
-    img_sizes = [3,5,7,10,13,28]
+    img_sizes = [3,5,10,21]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
@@ -236,16 +248,35 @@ def process_inkml(fn, gt_df):
         im_df = pd.DataFrame(np.array(im))
 
         # project counts on x axis
-        im_arr.extend(im_df.apply(sum))
+        feat_arr.extend(im_df.apply(sum))
         # project counts on y axis
-        im_arr.extend(im_df.apply(sum,axis=1))
+        feat_arr.extend(im_df.apply(sum,axis=1))
 
         #im.save(fn+str(sz)+".bmp")
-        im_arr.extend(np.array(im).flatten().tolist())
+        if sz <= MED_IMG_SZ:
+            feat_arr.extend(np.array(im).flatten().tolist())
+        else:
+            # rotated projections
+            im = im.rotate(45)
+            im_df = pd.DataFrame(np.array(im))
+
+            # project counts on x axis
+            feat_arr.extend(im_df.apply(sum))
+            # project counts on y axis
+            feat_arr.extend(im_df.apply(sum,axis=1))
+
+            # rotated projections
+            im = im.rotate(15)
+            im_df = pd.DataFrame(np.array(im))
+
+            # project counts on x axis
+            feat_arr.extend(im_df.apply(sum))
+            # project counts on y axis
+            feat_arr.extend(im_df.apply(sum,axis=1))
     #'''
 
     #'''
-    img_sizes = [3,5,7,13,28]
+    img_sizes = [3,5,10,21]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
@@ -253,28 +284,47 @@ def process_inkml(fn, gt_df):
         width = round(1/sz)
         s_pts = [scale(p,sv) for p in daa_pts]
         draw.line(s_pts, fill=128, width=width)
-        #im_arr.extend(np.array(im).flatten().tolist())
+        #feat_arr.extend(np.array(im).flatten().tolist())
         im_df = pd.DataFrame(np.array(im))
 
         # project counts on x axis
-        im_arr.extend(im_df.apply(sum))
+        feat_arr.extend(im_df.apply(sum))
         # project counts on y axis
-        im_arr.extend(im_df.apply(sum,axis=1))
+        feat_arr.extend(im_df.apply(sum,axis=1))
+
+        if sz > MED_IMG_SZ:
+            # rotated projections
+            im = im.rotate(45)
+            im_df = pd.DataFrame(np.array(im))
+
+            # project counts on x axis
+            feat_arr.extend(im_df.apply(sum))
+            # project counts on y axis
+            feat_arr.extend(im_df.apply(sum,axis=1))
+
+            # rotated projections
+            im = im.rotate(15)
+            im_df = pd.DataFrame(np.array(im))
+
+            # project counts on x axis
+            feat_arr.extend(im_df.apply(sum))
+            # project counts on y axis
+            feat_arr.extend(im_df.apply(sum,axis=1))
     #'''
 
     #''' Testing without angle data
     # bin relative and absolute angles
-    bin_sizes = [2,3,4,6,8,16]#,32]
+    bin_sizes = [2,3,4,6,8,32]
     for n_bins in bin_sizes:
-        im_arr.extend(bin_angles( \
+        feat_arr.extend(bin_angles( \
                 r_angles, n_bins))
-        im_arr.extend(bin_angles( \
+        feat_arr.extend(bin_angles( \
                 a_angles, n_bins))
     #'''
 
-    im_arr.extend((fn, sfn, symbol, ar, \
+    feat_arr.extend((fn, sfn, symbol, ar, \
             avg_dist, n_traces, total_sym_len))
-    return im_arr
+    return feat_arr
 
 
 def preprocess_dir(fdir, gt_df):
@@ -304,21 +354,6 @@ def preprocess_dir(fdir, gt_df):
     ldc = len(data.columns)
     d_columns = {v:columns[v-ldc+lc] for v in data.columns[-lc:]}
     data.rename(columns=d_columns, inplace=True)
-    print("\tAdding aspect values...")
-
-    aspect_very_high = lambda a: int(a > 3)
-    aspect_high = lambda a: int(a > 1.2)
-    aspect_med = lambda a: int(a < 1.2 and a > 0.8)
-    aspect_low = lambda a: int(a < 0.8)
-    aspect_very_low = lambda a: int(a < 0.3)
-    aspect_pos = lambda a: int(a > 1)
-
-    data['aspect_pos'] = data['aspect'].apply(aspect_pos)
-    data['aspect_very_high'] = data['aspect'].apply(aspect_very_high)
-    data['aspect_high'] = data['aspect'].apply(aspect_high)
-    data['aspect_med'] = data['aspect'].apply(aspect_med)
-    data['aspect_low'] = data['aspect'].apply(aspect_low)
-    data['aspect_very_low'] = data['aspect'].apply(aspect_very_low)
 
     print("\nSaving preprocessed data to disk...")
     pickle.dump(data, open(pickle_fn, 'wb'))
