@@ -47,113 +47,8 @@ def calc_scale_fn(pts):
     return scale_pt, y_range/(x_range+1)
 
 
-# convert traces into (id, coordinate list) pairs
-def process_traces(ts):
-    get_trace_id = lambda t: int(t['id'].replace('"',''))
-    get_trace_pts = lambda t: process_trace_str(t.string)
-    id_traces = { get_trace_id(t): get_trace_pts(t) for t in ts}
-    trace_ids = list(id_traces.keys())
-    trace_ids.sort()
-
-    # collect points from all traces
-    pts = []
-    for tid in trace_ids:
-        pts.extend( id_traces[tid] )
-
-    p_data = process_pts(pts)
-    p_data.append(len(trace_ids))
-    return p_data
-
-
-def process_pts(pts):
-    e_dist = lambda a,b: (\
-            (a[0]-b[0])**2 + \
-            (a[1]-b[1])**2)**(1/2)
-
-    # compute the total length of the strokes in the symbol
-    total_sym_len = 0
-    for i in range(1,len(pts)):
-        total_sym_len += e_dist(pts[i], pts[i-1])
-
-    # scaling function
-    scale, ar = calc_scale_fn(pts)
-
-    # scale each point
-    for i in range(len(pts)):
-        pts[i] = scale(pts[i])
-
-    # compute the total length of the strokes in the symbol
-    total_sym_len = 0
-    for i in range(1,len(pts)):
-        total_sym_len += e_dist(pts[i], pts[i-1])
-
-    '''
-    midpoint = lambda a,b: ( \
-            (a[0]+b[0])/2, \
-            (a[1]+b[1])/2)
-
-    # convert to midpoints
-    for i in range(len(pts)-1):
-        pts[i] = midpoint(pts[i],pts[i+1])
-    '''
-
-    midpoint3 = lambda a,b,c: ( \
-            (a[0]+b[0]+c[0])/3, \
-            (a[1]+b[1]+c[1])/3)
-
-    # convert to midpoints
-    for i in range(len(pts)-2):
-        pts[i] = midpoint3(pts[i],pts[i+1],pts[i+2])
-
-    '''
-    sz = 1000
-    im = Image.new('1', (sz,sz))
-    draw = ImageDraw.Draw(im)
-    sv = IMG_SIZE/sz
-    width = round(1/sz)
-    draw.line(pts, fill=128, width=width)
-    #im.save("my_symbol.bmp")
-    '''
-
-    angle = lambda a,b: (\
-            math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
-
-    n_pts = len(pts)
-    r_angles = [0]*n_pts
-    a_angles = [0]*n_pts
-    dists = [0]*n_pts
-    c_dists = [0]*n_pts
-    daa_pts = [None]*n_pts
-    daa_pts[0] = (0,0)
-    for i in range(1, n_pts):
-        # absolute angles
-        a_angles[i] = angle(pts[i], pts[i-1])
-
-        # relative angles
-        r_angles[i] = a_angles[i] - a_angles[i-1]
-
-        # distance
-        dists[i] = e_dist(pts[i], pts[i-1])
-
-        # cumulative distance
-        c_dists[i] = dists[i] + c_dists[i-1]
-
-        # (IMG_SIZE * scaled distance, abs angle) pts
-        daa_pts[i] = ( \
-                IMG_SIZE*c_dists[i]/(total_sym_len+1), \
-                a_angles[i])
-
-    # scaling function
-    daa_scale, daa_ar = calc_scale_fn(daa_pts)
-
-    # scale each daa point
-    for i in range(len(daa_pts)):
-        daa_pts[i] = daa_scale(daa_pts[i])
-
-    # average distance between points
-    avg_dist = sum(dists)/len(dists)
-
-    return [pts, a_angles, r_angles, daa_pts, avg_dist, ar, total_sym_len]
+def e_dist(a,b):
+    return ((a[0]-b[0])**2 + (a[1]-b[1])**2)**(1/2)
 
 
 # convert filename of xml file to beautiful soup object
@@ -220,31 +115,28 @@ def bin_angles(angles, n_bins=8):
     return angle_bins
 
 
-def process_inkml(fn, gt_df):
-    soup = xml_to_soup(fn)
-
-    sfn = get_soup_fn(soup)
-    symbol = get_GT_symbol(sfn, gt_df)
-    #print(fn,":",sfn,":", symbol)
-
-    pts, a_angles, r_angles, daa_pts, avg_dist, ar, \
-            total_sym_len, n_traces = \
-            process_traces(soup.find_all('trace'))
-
-    scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
+def extract_features(traces):
+    # collect points from all scaled traces
+    pts = []
+    for t in traces:
+        pts.extend(t)
 
     # add first and last points
     feat_arr = [pts[0][0],pts[0][1],pts[-1][0],pts[-1][1]]
+
+    scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
+
     # draw image from traces at different scales
-    #''' Testing without image data
     img_sizes = [3,5,10,21]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
         sv = IMG_SIZE/sz
         width = round(1/sz)
-        s_pts = [scale(p,sv) for p in pts]
-        draw.line(s_pts, fill=128, width=width)
+        for t in traces:
+            s_pts = [scale(p,sv) for p in t]
+            draw.line(s_pts, fill=128, width=width)
+        #im.save(fn+str(sz)+".bmp")
         im_df = pd.DataFrame(np.array(im))
 
         # project counts on x axis
@@ -252,7 +144,6 @@ def process_inkml(fn, gt_df):
         # project counts on y axis
         feat_arr.extend(im_df.apply(sum,axis=1))
 
-        #im.save(fn+str(sz)+".bmp")
         if sz <= MED_IMG_SZ:
             feat_arr.extend(np.array(im).flatten().tolist())
         else:
@@ -273,9 +164,54 @@ def process_inkml(fn, gt_df):
             feat_arr.extend(im_df.apply(sum))
             # project counts on y axis
             feat_arr.extend(im_df.apply(sum,axis=1))
-    #'''
 
-    #'''
+
+    # compute the total length of the strokes in the symbol
+    total_sym_len = 0
+    for i in range(1,len(pts)):
+        total_sym_len += e_dist(pts[i], pts[i-1])
+    feat_arr.append(total_sym_len)
+
+    angle = lambda a,b: (\
+            math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
+
+    n_pts = len(pts)
+    feat_arr.append(n_pts)
+    r_angles = [0]*n_pts
+    a_angles = [0]*n_pts
+    dists = [0]*n_pts
+    c_dists = [0]*n_pts
+    daa_pts = [None]*n_pts
+    daa_pts[0] = (0,0)
+    for i in range(1, n_pts):
+        # absolute angles
+        a_angles[i] = angle(pts[i], pts[i-1])
+
+        # relative angles
+        r_angles[i] = a_angles[i] - a_angles[i-1]
+
+        # distance
+        dists[i] = e_dist(pts[i], pts[i-1])
+
+        # cumulative distance
+        c_dists[i] = dists[i] + c_dists[i-1]
+
+        # (IMG_SIZE * scaled distance, abs angle) pts
+        daa_pts[i] = ( \
+                IMG_SIZE*c_dists[i]/(total_sym_len+1), \
+                a_angles[i])
+
+    # scaling function
+    daa_scale, daa_ar = calc_scale_fn(daa_pts)
+
+    # scale each daa point
+    for i in range(len(daa_pts)):
+        daa_pts[i] = daa_scale(daa_pts[i])
+
+    # average distance between points
+    avg_dist = sum(dists)/len(dists)
+    feat_arr.append(avg_dist)
+
     img_sizes = [3,5,10,21]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
@@ -310,9 +246,7 @@ def process_inkml(fn, gt_df):
             feat_arr.extend(im_df.apply(sum))
             # project counts on y axis
             feat_arr.extend(im_df.apply(sum,axis=1))
-    #'''
 
-    #''' Testing without angle data
     # bin relative and absolute angles
     bin_sizes = [2,3,4,6,8,32]
     for n_bins in bin_sizes:
@@ -320,10 +254,92 @@ def process_inkml(fn, gt_df):
                 r_angles, n_bins))
         feat_arr.extend(bin_angles( \
                 a_angles, n_bins))
-    #'''
 
-    feat_arr.extend((fn, sfn, symbol, ar, \
-            avg_dist, n_traces, total_sym_len))
+    return feat_arr
+
+
+def process_inkml(fn, gt_df):
+    soup = xml_to_soup(fn)
+
+    sfn = get_soup_fn(soup)
+    symbol = get_GT_symbol(sfn, gt_df)
+    #print(fn,":",sfn,":", symbol)
+
+    # convert traces into (id, coordinate list) pairs
+    ts = soup.find_all('trace')
+
+    get_trace_id = lambda t: int(t['id'].replace('"',''))
+    get_trace_pts = lambda t: process_trace_str(t.string)
+    id_traces = { get_trace_id(t): get_trace_pts(t) for t in ts}
+    trace_ids = list(id_traces.keys())
+    trace_ids.sort()
+
+    # collect points from all traces
+    pts = []
+    for tid in trace_ids:
+        pts.extend( id_traces[tid] )
+
+    '''
+    # compute the total length of the strokes in the symbol
+    total_sym_len = 0
+    for i in range(1,len(pts)):
+        total_sym_len += e_dist(pts[i], pts[i-1])
+    '''
+
+    # scaling function
+    scale, ar = calc_scale_fn(pts)
+
+    # scale each point
+    for i in range(len(pts)):
+        pts[i] = scale(pts[i])
+
+    s_traces = []
+    s_traces2 = []
+    total_pts = 0
+    for tid in trace_ids:
+        t_len = len(id_traces[tid])
+        # scaled points for this trace
+        spts = pts[total_pts:(total_pts+t_len)]
+        s_traces.append(spts)
+        s_traces2.append(spts)
+        total_pts += t_len
+
+    midpoint3 = lambda a,b,c: ( \
+            (a[0]+b[0]+c[0])/3, \
+            (a[1]+b[1]+c[1])/3)
+
+    # convert to midpoints of 3
+    for t in s_traces:
+        for i in range(len(t)-2):
+            t[i] = midpoint3(t[i],t[i+1],t[i+2])
+
+    midpoint = lambda a,b: ( \
+            (a[0]+b[0])/2, \
+            (a[1]+b[1])/2)
+
+    # convert to midpoints of 2
+    for t in s_traces2:
+        for i in range(len(t)-1):
+            t[i] = midpoint(t[i],t[i+1])
+
+    '''
+    sz = 1000
+    im = Image.new('1', (sz,sz))
+    draw = ImageDraw.Draw(im)
+    sv = IMG_SIZE/sz
+    width = round(1/sz)
+    for t in s_traces:
+        draw.line(t, fill=128, width=width)
+    im.save("my_symbol.bmp")
+    '''
+
+    feat_arr = []
+    # use both sets of traces scaled using 2 and 3 pts
+    for st in [s_traces, s_traces2]:
+        feat_arr.extend(extract_features(st))
+
+    n_traces = len(trace_ids)
+    feat_arr.extend((fn, sfn, symbol, ar, n_traces))
     return feat_arr
 
 
@@ -334,7 +350,7 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
-    columns= ["fn","symbol_fn","symbol","aspect", "avg_dist", "n_traces", "total_sym_len"]
+    columns= ["fn","symbol_fn","symbol","aspect", "n_traces"]
     to_process = glob(os.path.join(fdir, "*.inkml"))
     n_to_process = len(to_process)
     n_done = 0

@@ -325,7 +325,7 @@ def main():
     '''
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.99, threshold=0.005)
+    splits = apply_drfs(splits, load=False, eps=0.999, threshold="0.9*median")#0.004)
 
     n_samples, n_features, n_classes = get_counts(splits)
 
@@ -382,9 +382,10 @@ def main():
     #test_on_train(name, xtc, splits)
 
     name = "SVM C=50.0, gamma=auto, uniform weights"
-    svmm = svm.SVC(C=50.0, gamma='auto', tol=0.000001, probability=True)
-    train_test(name, svmm, splits)
+    svmm = svm.SVC(C=50.0, gamma='auto', tol=0.00001, probability=True)
+    prs = train_test(name, svmm, splits)
     #test_on_train(name, svmm, splits)
+    print(metrics.classification_report(prs, splits['test_y']))
 
     '''
     name = "SVM C=100.0, gamma=auto, uniform weights"
