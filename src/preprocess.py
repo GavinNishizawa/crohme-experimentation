@@ -23,13 +23,9 @@ def process_trace_str(s):
 
 def calc_scale_fn(pts):
     # find min and max x and y values
-    xs = [p[0] for p in pts]
-    ys = [p[1] for p in pts]
-
-    min_x = min(xs)
-    max_x = max(xs)
-    min_y = min(ys)
-    max_y = max(ys)
+    df_pts = pd.DataFrame(np.array(pts))
+    max_x,max_y = df_pts[[0,1]].apply(max)
+    min_x,min_y = df_pts[[0,1]].apply(min)
 
     x_range = max_x-min_x
     y_range = max_y-min_y
@@ -121,21 +117,30 @@ def extract_features(traces):
     for t in traces:
         pts.extend(t)
 
-    # add first and last points
-    feat_arr = [pts[0][0],pts[0][1],pts[-1][0],pts[-1][1]]
+    angle = lambda a,b: (\
+            math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
+
+    # add first and last points and angle between
+    feat_arr = [pts[0][0],pts[0][1],pts[-1][0],pts[-1][1], \
+            angle(pts[-1], pts[0])]
+
+    # add first 4 trace angles
+    f4_tas = [0]*4
+    for i in range(min(4,len(traces))):
+        f4_tas[i] = angle(traces[i][0], traces[i][-1])
+    feat_arr.extend(f4_tas)
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
     # draw image from traces at different scales
-    img_sizes = [3,5,10,21]
+    img_sizes = [3,5,10,50]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
         sv = IMG_SIZE/sz
-        width = round(1/sz)
         for t in traces:
             s_pts = [scale(p,sv) for p in t]
-            draw.line(s_pts, fill=128, width=width)
+            draw.line(s_pts, fill=128, width=1)
         #im.save(fn+str(sz)+".bmp")
         im_df = pd.DataFrame(np.array(im))
 
@@ -146,24 +151,24 @@ def extract_features(traces):
 
         if sz <= MED_IMG_SZ:
             feat_arr.extend(np.array(im).flatten().tolist())
-        else:
-            # rotated projections
-            im = im.rotate(45)
-            im_df = pd.DataFrame(np.array(im))
 
-            # project counts on x axis
-            feat_arr.extend(im_df.apply(sum))
-            # project counts on y axis
-            feat_arr.extend(im_df.apply(sum,axis=1))
+        # rotated projections
+        im = im.rotate(45, resample=Image.BICUBIC)
+        im_df = pd.DataFrame(np.array(im))
 
-            # rotated projections
-            im = im.rotate(15)
-            im_df = pd.DataFrame(np.array(im))
+        # project counts on x axis
+        feat_arr.extend(im_df.apply(sum))
+        # project counts on y axis
+        feat_arr.extend(im_df.apply(sum,axis=1))
 
-            # project counts on x axis
-            feat_arr.extend(im_df.apply(sum))
-            # project counts on y axis
-            feat_arr.extend(im_df.apply(sum,axis=1))
+        # rotated projections
+        im = im.rotate(15, resample=Image.BICUBIC)
+        im_df = pd.DataFrame(np.array(im))
+
+        # project counts on x axis
+        feat_arr.extend(im_df.apply(sum))
+        # project counts on y axis
+        feat_arr.extend(im_df.apply(sum,axis=1))
 
 
     # compute the total length of the strokes in the symbol
@@ -171,9 +176,6 @@ def extract_features(traces):
     for i in range(1,len(pts)):
         total_sym_len += e_dist(pts[i], pts[i-1])
     feat_arr.append(total_sym_len)
-
-    angle = lambda a,b: (\
-            math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
 
     n_pts = len(pts)
     feat_arr.append(n_pts)
@@ -212,14 +214,13 @@ def extract_features(traces):
     avg_dist = sum(dists)/len(dists)
     feat_arr.append(avg_dist)
 
-    img_sizes = [3,5,10,21]
+    img_sizes = [5,10,50]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
         sv = IMG_SIZE/sz
-        width = round(1/sz)
         s_pts = [scale(p,sv) for p in daa_pts]
-        draw.line(s_pts, fill=128, width=width)
+        draw.line(s_pts, fill=128, width=1)
         #feat_arr.extend(np.array(im).flatten().tolist())
         im_df = pd.DataFrame(np.array(im))
 
@@ -228,24 +229,23 @@ def extract_features(traces):
         # project counts on y axis
         feat_arr.extend(im_df.apply(sum,axis=1))
 
-        if sz > MED_IMG_SZ:
-            # rotated projections
-            im = im.rotate(45)
-            im_df = pd.DataFrame(np.array(im))
+        # rotated projections
+        im = im.rotate(45, resample=Image.BICUBIC)
+        im_df = pd.DataFrame(np.array(im))
 
-            # project counts on x axis
-            feat_arr.extend(im_df.apply(sum))
-            # project counts on y axis
-            feat_arr.extend(im_df.apply(sum,axis=1))
+        # project counts on x axis
+        feat_arr.extend(im_df.apply(sum))
+        # project counts on y axis
+        feat_arr.extend(im_df.apply(sum,axis=1))
 
-            # rotated projections
-            im = im.rotate(15)
-            im_df = pd.DataFrame(np.array(im))
+        # rotated projections
+        im = im.rotate(15, resample=Image.BICUBIC)
+        im_df = pd.DataFrame(np.array(im))
 
-            # project counts on x axis
-            feat_arr.extend(im_df.apply(sum))
-            # project counts on y axis
-            feat_arr.extend(im_df.apply(sum,axis=1))
+        # project counts on x axis
+        feat_arr.extend(im_df.apply(sum))
+        # project counts on y axis
+        feat_arr.extend(im_df.apply(sum,axis=1))
 
     # bin relative and absolute angles
     bin_sizes = [2,3,4,6,8,32]
@@ -279,6 +279,13 @@ def process_inkml(fn, gt_df):
     for tid in trace_ids:
         pts.extend( id_traces[tid] )
 
+    # calculate symbol width and height in original space
+    df_pts = pd.DataFrame(np.array(pts))
+    max_x,max_y = df_pts[[0,1]].apply(max)
+    min_x,min_y = df_pts[[0,1]].apply(min)
+    width = max_x - min_x
+    height = max_y - min_y
+
     '''
     # compute the total length of the strokes in the symbol
     total_sym_len = 0
@@ -294,15 +301,17 @@ def process_inkml(fn, gt_df):
         pts[i] = scale(pts[i])
 
     s_traces = []
-    s_traces2 = []
     total_pts = 0
     for tid in trace_ids:
         t_len = len(id_traces[tid])
         # scaled points for this trace
-        spts = pts[total_pts:(total_pts+t_len)]
-        s_traces.append(spts)
-        s_traces2.append(spts)
+        s_traces.append( \
+                pts[total_pts:(total_pts+t_len)])
         total_pts += t_len
+
+    midpoint = lambda a,b: ( \
+            (a[0]+b[0])/2, \
+            (a[1]+b[1])/2)
 
     midpoint3 = lambda a,b,c: ( \
             (a[0]+b[0]+c[0])/3, \
@@ -310,36 +319,28 @@ def process_inkml(fn, gt_df):
 
     # convert to midpoints of 3
     for t in s_traces:
-        for i in range(len(t)-2):
-            t[i] = midpoint3(t[i],t[i+1],t[i+2])
-
-    midpoint = lambda a,b: ( \
-            (a[0]+b[0])/2, \
-            (a[1]+b[1])/2)
-
-    # convert to midpoints of 2
-    for t in s_traces2:
-        for i in range(len(t)-1):
-            t[i] = midpoint(t[i],t[i+1])
+        if len(t) > 3:
+            for i in range(1,len(t)-1):
+                t[i] = midpoint3(t[i-1],t[i],t[i+1])
 
     '''
-    sz = 1000
+    scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
+    print(s_traces)
+    sz = IMG_SIZE
     im = Image.new('1', (sz,sz))
     draw = ImageDraw.Draw(im)
     sv = IMG_SIZE/sz
-    width = round(1/sz)
     for t in s_traces:
-        draw.line(t, fill=128, width=width)
+        s_pts = [scale(p,sv) for p in t]
+        draw.line(s_pts, fill=128, width=1)
     im.save("my_symbol.bmp")
     '''
 
-    feat_arr = []
-    # use both sets of traces scaled using 2 and 3 pts
-    for st in [s_traces, s_traces2]:
-        feat_arr.extend(extract_features(st))
+    feat_arr = extract_features(s_traces)
 
     n_traces = len(trace_ids)
-    feat_arr.extend((fn, sfn, symbol, ar, n_traces))
+    feat_arr.extend((fn, sfn, symbol, ar, n_traces, \
+            width, height))
     return feat_arr
 
 
@@ -350,7 +351,8 @@ def preprocess_dir(fdir, gt_df):
         return pickle.load(open(pickle_fn, 'rb'))
 
     processed = []
-    columns= ["fn","symbol_fn","symbol","aspect", "n_traces"]
+    columns= ["fn","symbol_fn","symbol","aspect","n_traces", \
+            "width","height"]
     to_process = glob(os.path.join(fdir, "*.inkml"))
     n_to_process = len(to_process)
     n_done = 0
