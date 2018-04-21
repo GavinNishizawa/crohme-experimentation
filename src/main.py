@@ -212,6 +212,7 @@ def train_drfs(train_x, train_y, eps=0.5, threshold="median"):
     print("Feature importances:")
     print("\tMax:",max(xtc.feature_importances_))
     print("\tMin:",min(xtc.feature_importances_))
+    #print(xtc.feature_importances_)
 
     # create the feature selection model from the xtc
     feat_sel = feature_selection.SelectFromModel( \
@@ -325,7 +326,7 @@ def main():
     '''
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.999, threshold="0.9*median")#0.004)
+    splits = apply_drfs(splits, load=False, eps=0.001, threshold="0.9*median")#0.004)
 
     n_samples, n_features, n_classes = get_counts(splits)
 
@@ -348,6 +349,10 @@ def main():
     # test Ada Boost model
     abc = ensemble.AdaBoostClassifier(rfc, n_estimators=5)
     train_test("Ada Boosted RF", abc, splits)
+
+    name = "KNN (5)"
+    knc = neighbors.KNeighborsClassifier(n_neighbors=5)
+    train_test(name, knc, splits)
     '''
 
     name = "Extra Trees"
@@ -361,33 +366,25 @@ def main():
     train_test(name, xtc, splits)
     #test_on_train(name, xtc, splits)
 
-    '''
-    name = "Extra Trees (50) max depth 30"
-    xtc = ensemble.ExtraTreesClassifier( \
-            n_estimators=50, max_depth=30, n_jobs=-1)
-    train_test(name, xtc, splits)
-    test_on_train(name, xtc, splits)
-
-    # test Ada Boost model
-    name = "Ada Boosted Extra Trees (50) max depth 21"
-    abc = ensemble.AdaBoostClassifier(xtc, n_estimators=3)
-    train_test(name, abc, splits)
-    #test_on_train(name, abc, splits)
-    '''
-
     name = "Extra Trees (100)"
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=100, n_jobs=-1)
     train_test(name, xtc, splits)
-    #test_on_train(name, xtc, splits)
 
-    name = "SVM C=50.0, gamma=auto, uniform weights"
-    svmm = svm.SVC(C=50.0, gamma='auto', tol=0.00001, probability=True)
-    prs = train_test(name, svmm, splits)
-    #test_on_train(name, svmm, splits)
+    name = "SVM C=25.0, gamma=auto, uniform weights"
+    svmm = svm.SVC(C=25.0, gamma='auto', tol=0.00001, probability=True)
+    #train_test(name, svmm, splits)
+
+    votc = ensemble.VotingClassifier(estimators=[ \
+            ('xt100',xtc),('svm',svmm)], \
+            voting='soft', weights=[4,7])
+    prs = train_test("Voting [ExtraTrees(100), SVM(C=25)] (soft)", votc, splits)
     print(metrics.classification_report(prs, splits['test_y']))
 
     '''
+    bagc = ensemble.BaggingClassifier(svmm, max_samples=1.0, bootstrap=False, max_features=0.7, n_estimators=3, n_jobs=-1)
+    train_test("Bagged (3) 0.7 SVM", bagc, splits)
+
     name = "SVM C=100.0, gamma=auto, uniform weights"
     svmm = svm.SVC(C=100.0, gamma='auto', tol=0.000001, probability=True)
     train_test(name, svmm, splits)

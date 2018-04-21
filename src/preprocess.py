@@ -133,7 +133,7 @@ def extract_features(traces):
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
     # draw image from traces at different scales
-    img_sizes = [3,5,10,50]
+    img_sizes = [5,10]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
@@ -149,20 +149,11 @@ def extract_features(traces):
         # project counts on y axis
         feat_arr.extend(im_df.apply(sum,axis=1))
 
-        if sz <= MED_IMG_SZ:
+        if sz < MED_IMG_SZ:
             feat_arr.extend(np.array(im).flatten().tolist())
 
         # rotated projections
         im = im.rotate(45, resample=Image.BICUBIC)
-        im_df = pd.DataFrame(np.array(im))
-
-        # project counts on x axis
-        feat_arr.extend(im_df.apply(sum))
-        # project counts on y axis
-        feat_arr.extend(im_df.apply(sum,axis=1))
-
-        # rotated projections
-        im = im.rotate(15, resample=Image.BICUBIC)
         im_df = pd.DataFrame(np.array(im))
 
         # project counts on x axis
@@ -176,6 +167,7 @@ def extract_features(traces):
     for i in range(1,len(pts)):
         total_sym_len += e_dist(pts[i], pts[i-1])
     feat_arr.append(total_sym_len)
+
 
     n_pts = len(pts)
     feat_arr.append(n_pts)
@@ -199,61 +191,31 @@ def extract_features(traces):
         c_dists[i] = dists[i] + c_dists[i-1]
 
         # (IMG_SIZE * scaled distance, abs angle) pts
-        daa_pts[i] = ( \
-                IMG_SIZE*c_dists[i]/(total_sym_len+1), \
+        daa_pts[i] = (IMG_SIZE*c_dists[i]/(total_sym_len+1), \
                 a_angles[i])
-
-    # scaling function
-    daa_scale, daa_ar = calc_scale_fn(daa_pts)
-
-    # scale each daa point
-    for i in range(len(daa_pts)):
-        daa_pts[i] = daa_scale(daa_pts[i])
 
     # average distance between points
     avg_dist = sum(dists)/len(dists)
     feat_arr.append(avg_dist)
 
-    img_sizes = [5,10,50]
-    for sz in img_sizes:
-        im = Image.new('1', (sz,sz))
-        draw = ImageDraw.Draw(im)
-        sv = IMG_SIZE/sz
-        s_pts = [scale(p,sv) for p in daa_pts]
-        draw.line(s_pts, fill=128, width=1)
-        #feat_arr.extend(np.array(im).flatten().tolist())
-        im_df = pd.DataFrame(np.array(im))
-
-        # project counts on x axis
-        feat_arr.extend(im_df.apply(sum))
-        # project counts on y axis
-        feat_arr.extend(im_df.apply(sum,axis=1))
-
-        # rotated projections
-        im = im.rotate(45, resample=Image.BICUBIC)
-        im_df = pd.DataFrame(np.array(im))
-
-        # project counts on x axis
-        feat_arr.extend(im_df.apply(sum))
-        # project counts on y axis
-        feat_arr.extend(im_df.apply(sum,axis=1))
-
-        # rotated projections
-        im = im.rotate(15, resample=Image.BICUBIC)
-        im_df = pd.DataFrame(np.array(im))
-
-        # project counts on x axis
-        feat_arr.extend(im_df.apply(sum))
-        # project counts on y axis
-        feat_arr.extend(im_df.apply(sum,axis=1))
-
-    # bin relative and absolute angles
-    bin_sizes = [2,3,4,6,8,32]
+    # bin relative and absolute angles and daa pts
+    bin_sizes = [3,8]
     for n_bins in bin_sizes:
         feat_arr.extend(bin_angles( \
                 r_angles, n_bins))
         feat_arr.extend(bin_angles( \
                 a_angles, n_bins))
+
+        # bin daa pts
+        get_bin_ind = lambda d,n: int(d*n/IMG_SIZE)
+        daa_bins = [0]*n_bins
+        for p in daa_pts:
+            # index of bin
+            ind = get_bin_ind(p[0], n_bins)
+            daa_bins[ind] += p[1]
+
+        daa_bins = [ n%360 for n in daa_bins]
+        feat_arr.extend(daa_bins)
 
     return feat_arr
 
@@ -271,12 +233,12 @@ def process_traces(traces):
     width = max_x - min_x
     height = max_y - min_y
 
-    '''
+    #'''
     # compute the total length of the strokes in the symbol
     total_sym_len = 0
     for i in range(1,len(pts)):
         total_sym_len += e_dist(pts[i], pts[i-1])
-    '''
+    #'''
 
     # scaling function
     scale, ar = calc_scale_fn(pts)
@@ -323,7 +285,7 @@ def process_traces(traces):
 
     feat_arr = extract_features(s_traces)
 
-    feat_arr.extend((ar, len(traces), width, height))
+    feat_arr.extend((total_sym_len, ar, len(traces), width, height))
     return feat_arr
 
 
@@ -370,7 +332,7 @@ def preprocess_dir(fdir, gt_df):
         print("\r[{0}] {2}/{3} ({1}%) {4}".format( \
                 '#'*p20+' '*(20-p20), round(p_done*100), \
                 n_done, n_to_process, os.path.basename(f)), \
-                end='', flush=True)
+                end='')
 
     print("\nPerforming additional preprocessing...")
     data = pd.DataFrame(processed)
