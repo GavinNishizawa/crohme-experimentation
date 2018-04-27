@@ -17,7 +17,7 @@ def get_splits(data, ratio, train_p, total_p):
     train, ignore = split_data(train, train_p)
 
     col_list = train.columns.tolist()
-    to_rm = ['symbol','fn','symbol_fn']
+    to_rm = ['symbol','fn']
     for c in to_rm:
         col_list.remove(c)
 

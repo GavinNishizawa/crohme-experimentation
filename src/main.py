@@ -8,26 +8,38 @@ import pandas as pd
 import argparse
 from sklearn import linear_model, svm, neighbors, ensemble, metrics, decomposition, cluster, preprocessing, pipeline, random_projection, feature_selection
 
-from preprocess import preprocess_dir
+from preprocess import preprocess_dir, get_process_iso, process_inkml
 from split_data import split_data, get_splits
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Process a directory of inkml files using a ground truth reference file.")
+    parser = argparse.ArgumentParser(description="Process a directory of inkml files.")
     parser.add_argument("fdir", type=str, help="directory containing .inkml files")
-    parser.add_argument("gt", type=str, help="ground truth file")
-    parser.add_argument("ratio", type=float, help="ratio of train:test (0.0,1.0)")
-    parser.add_argument("train_p", type=float, help="amount of train used to train (0.0,1.0]")
-    parser.add_argument("total_p", type=float, help="amount of data used (0.0,1.0]")
+    parser.add_argument("gt", nargs="?", type=str, help="ground truth file")
+    parser.add_argument("-r", nargs="?", type=float, default=0.7, help="ratio of train:test (0.0,1.0)")
+    #parser.add_argument("train_p", nargs="?", type=float, default=1, help="amount of train used to train (0.0,1.0]")
+    parser.add_argument("-p", nargs="?", type=float, default=1, help="amount of data used (0.0,1.0]")
 
     return parser.parse_args()
 
 
-def get_data(gt_fn, dir_fn):
+def get_iso_data(gt_fn, dir_fn):
     # read in the ground truth file
     df = pd.read_csv(gt_fn, names=["fn","gt"])
 
-    data = preprocess_dir(dir_fn, df)
+    process_iso = get_process_iso(df)
+    data = preprocess_dir(dir_fn, process_iso)
+    #print(data.head(1))
+    return data
+
+
+def my_get_data(dir_fn, gt_fn):
+    if gt_fn != None:
+        print("Getting iso data...")
+        data = get_iso_data(gt_fn, dir_fn)
+    else:
+        print("Getting data...")
+        data = preprocess_dir(dir_fn, process_inkml)
     #print(data.head(1))
     return data
 
@@ -264,14 +276,14 @@ def print_time(start,end):
 
 def main():
     args = parse_args()
-    ratio = args.ratio
-    train_p = args.train_p
-    total_p = args.total_p
+    ratio = args.r
+    train_p = 1.0#args.train_p
+    total_p = args.p
 
     start_time = time.time()
 
     print("Preprocessing inkml files...")
-    data = get_data(args.gt, args.fdir)
+    data = my_get_data(args.fdir, args.gt)
 
     print("Splitting data into folds...")
 
@@ -373,11 +385,11 @@ def main():
 
     name = "SVM C=25.0, gamma=auto, uniform weights"
     svmm = svm.SVC(C=25.0, gamma='auto', tol=0.00001, probability=True)
-    #train_test(name, svmm, splits)
+    train_test(name, svmm, splits)
 
     votc = ensemble.VotingClassifier(estimators=[ \
             ('xt100',xtc),('svm',svmm)], \
-            voting='soft', weights=[4,7])
+            voting='soft', weights=[4,9])
     prs = train_test("Voting [ExtraTrees(100), SVM(C=25)] (soft)", votc, splits)
     print(metrics.classification_report(prs, splits['test_y']))
 
