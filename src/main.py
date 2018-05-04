@@ -6,10 +6,11 @@ import warnings
 import numpy as np
 import pandas as pd
 import argparse
-from sklearn import linear_model, svm, neighbors, ensemble, metrics, decomposition, cluster, preprocessing, pipeline, random_projection, feature_selection
+from sklearn import linear_model, svm, neighbors, ensemble, metrics, decomposition, cluster, preprocessing, pipeline, random_projection, feature_selection, neural_network
 
-from preprocess import preprocess_dir, get_process_iso, process_inkml
-from split_data import split_data, get_splits
+from preprocess import preprocess_dir, get_process_iso, \
+        get_get_symbols_iso, get_symbols_inkml, process_inkml
+from split_data import get_splits
 
 
 def parse_args():
@@ -23,23 +24,24 @@ def parse_args():
     return parser.parse_args()
 
 
-def get_iso_data(gt_fn, dir_fn):
+def get_iso_data(gt_fn, dir_fn, ratio):
     # read in the ground truth file
     df = pd.read_csv(gt_fn, names=["fn","gt"])
 
     process_iso = get_process_iso(df)
-    data = preprocess_dir(dir_fn, process_iso)
+    get_symbols = get_get_symbols_iso(df)
+    data = preprocess_dir(dir_fn, process_iso, get_symbols, ratio)
     #print(data.head(1))
     return data
 
 
-def my_get_data(dir_fn, gt_fn):
+def my_get_data(dir_fn, gt_fn, ratio):
     if gt_fn != None:
         print("Getting iso data...")
-        data = get_iso_data(gt_fn, dir_fn)
+        data = get_iso_data(gt_fn, dir_fn, ratio)
     else:
         print("Getting data...")
-        data = preprocess_dir(dir_fn, process_inkml)
+        data = preprocess_dir(dir_fn, process_inkml, get_symbols_inkml, ratio)
     #print(data.head(1))
     return data
 
@@ -53,66 +55,6 @@ def print_results(name, predict, ys):
     warnings.resetwarnings()
     #print(metrics.accuracy_score(predict, ys))
     #print(metrics.classification_report(predict, ys))
-
-
-def get_cluster_distances(df, func):
-    norm_df = lambda f: (f-f.min())/(f.max()-f.min()+1)
-
-    ndf = df.apply(func, axis=1)
-    ndf = ndf.apply(pd.Series)
-    #ndf = norm_df(ndf)
-    #ndf = ndf.apply(pd.Series)
-    return ndf
-
-
-def apply_kmeans(splits):
-    print("Adding cluster distances as features...")
-
-    # cluster splits
-    c_splits = dict(splits)
-    # feature selection for clusters
-    c_splits = apply_feature_select(c_splits, "mean")
-
-    n_samples, n_features, n_classes = get_counts(c_splits)
-
-    kmeans = cluster.MiniBatchKMeans(n_clusters=n_classes)
-    kmeans.fit(c_splits['train_x'])
-    apply_kmeans = lambda d: tuple(kmeans.transform([d]).ravel())
-
-    print("\tKMeans...")
-    train_km = get_cluster_distances(c_splits['train_x'], apply_kmeans)
-    test_km = get_cluster_distances(c_splits['test_x'], apply_kmeans)
-
-    train_km.index = splits['train_x'].index
-    splits['train_x'] = pd.concat([splits['train_x'], train_km], axis=1)
-
-    test_km.index = splits['test_x'].index
-    splits['test_x'] = pd.concat([c_splits['test_x'], test_km], axis=1)
-
-    n_samples, n_features, n_classes = get_counts(splits)
-    print("Added cluster distances:",n_samples, n_features, n_classes)
-    return splits
-
-
-def apply_reduction(splits, eps):
-    print("Applying dimensionality reduction...")
-    n_samples, n_features, n_classes = get_counts(splits)
-    print("Before:",n_samples, n_features, n_classes)
-
-    min_comp = random_projection.johnson_lindenstrauss_min_dim(n_samples=n_samples, eps=eps)
-    min_comp = min(min_comp, n_features)
-    #scaler = preprocessing.StandardScaler()
-    scaler = preprocessing.QuantileTransformer()
-    feat_agg = cluster.FeatureAgglomeration(n_clusters=min_comp)
-    pca_pipe = pipeline.Pipeline([('scaler',scaler),('feat_agg',feat_agg)])
-    splits['train_x'] = pd.DataFrame(pca_pipe.fit_transform( \
-            splits['train_x']))
-    splits['test_x'] = pd.DataFrame(pca_pipe.transform( \
-            splits['test_x']))
-
-    n_samples, n_features, n_classes = get_counts(splits)
-    print("After:",n_samples, n_features, n_classes)
-    return splits
 
 
 def get_save_fn(fn):
@@ -129,25 +71,6 @@ def load_obj(fn):
     sfn = get_save_fn(fn)
     if os.path.isfile(sfn):
         return pickle.load(open(sfn, 'rb'))
-
-
-def apply_feature_select(splits, threshold="median"):
-    xtc = ensemble.ExtraTreesClassifier(n_estimators=50, \
-            n_jobs=-1)
-    my_train_model(xtc, splits['train_x'], splits['train_y'])
-    print("Max Feature importance:",max(xtc.feature_importances_))
-    print("Min Feature importance:",min(xtc.feature_importances_))
-
-    feat_sel = feature_selection.SelectFromModel( \
-            xtc, prefit=True, threshold=threshold)
-    print("Before feature selection:",splits['train_x'].shape)
-
-    splits['train_x'] = pd.DataFrame( \
-            feat_sel.transform(splits['train_x']))
-    splits['test_x'] = pd.DataFrame( \
-            feat_sel.transform(splits['test_x']))
-    print("After feature selection:",splits['train_x'].shape)
-    return splits
 
 
 def my_train_model(model, train_x, train_y):
@@ -209,11 +132,14 @@ def train_drfs(train_x, train_y, eps=0.5, threshold="median"):
     scaler = preprocessing.QuantileTransformer()
     feat_agg = cluster.FeatureAgglomeration( \
             n_clusters=min_comp)
-    xtc = ensemble.ExtraTreesClassifier(n_estimators=50, n_jobs=-1)
+    xtc = ensemble.ExtraTreesClassifier(n_estimators=100, n_jobs=-1)
+    scaler2 = preprocessing.RobustScaler()
+    #poly = preprocessing.PolynomialFeatures(degree=2, interaction_only=True)
 
     # train the model pipeline
-    dr_pipe = pipeline.Pipeline(\
-            [('scaler', scaler), ('feat_agg', feat_agg)])
+    dr_pipe = pipeline.Pipeline([('scaler', scaler), \
+            ('feat_agg', feat_agg),('scaler2', scaler2)])
+
     dr_pipe.fit(train_x)
 
     # transform train_x to train xtc
@@ -244,6 +170,7 @@ def apply_drfs_sample(test_data, drfs_model):
 
 
 def apply_drfs(splits, typ='drfs_model_train', load=True, eps=0.5, threshold="median"):
+    start = time.time()
     drfs_pipe = None
     if load:
         drfs_pipe = load_obj(typ)
@@ -262,6 +189,7 @@ def apply_drfs(splits, typ='drfs_model_train', load=True, eps=0.5, threshold="me
 
     n_samples, n_features, n_classes = get_counts(splits)
     print("After:",n_samples, n_features, n_classes)
+    print_time(start, time.time())
 
     if splits['test_y'] is not None and len(splits['test_x']) > 0:
         splits['test_x'] = apply_drfs_sample( \
@@ -277,25 +205,22 @@ def print_time(start,end):
 def main():
     args = parse_args()
     ratio = args.r
-    train_p = 1.0#args.train_p
     total_p = args.p
 
     start_time = time.time()
 
     print("Preprocessing inkml files...")
-    data = my_get_data(args.fdir, args.gt)
-
-    print("Splitting data into folds...")
+    data = my_get_data(args.fdir, args.gt, ratio)
 
     # save/load data split
-    split_fn = "split"+str(ratio)+str(train_p)+str(total_p) + os.path.basename(args.fdir)
+    split_fn = "split"+str(ratio)+str(total_p) + os.path.basename(args.fdir)
 
     load = False
     splits = None
     if load:
         splits = load_obj(split_fn)
     if splits == None:
-        splits = get_splits(data, ratio, train_p, total_p)
+        splits = get_splits(data, total_p)
         if load:
             save_obj(split_fn, splits)
 
@@ -313,14 +238,6 @@ def main():
     train_test("Initial: Random Forest", rfc, splits)
     rfc = ensemble.RandomForestClassifier(criterion="entropy")
     train_test("Initial: Random Forest (entropy)", rfc, splits)
-    # scale
-    scaler = preprocessing.QuantileTransformer()
-    train_x = scaler.fit_transform(train_x)
-    test_x = scaler.transform(test_x)
-    splits = (train_x, train_y, test_x, test_y)
-
-    # add k means data as features (seems to reduce accuracy)
-    #splits = apply_kmeans(splits)
     '''
 
     name = "Extra Trees (50)"
@@ -329,16 +246,9 @@ def main():
     train_test(name, xtc, splits)
     #test_on_train(name, xtc, splits)
 
-    '''
-    name = "Extra Trees (50) max depth 30"
-    xtc = ensemble.ExtraTreesClassifier( \
-            n_estimators=50, max_depth=30, n_jobs=-1)
-    train_test(name, xtc, splits)
-    test_on_train(name, xtc, splits)
-    '''
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.001, threshold="0.9*median")#0.004)
+    splits = apply_drfs(splits, load=False, eps=0.001, threshold="0.9*mean")#0.004)
 
     n_samples, n_features, n_classes = get_counts(splits)
 
@@ -363,14 +273,14 @@ def main():
     train_test("Ada Boosted RF", abc, splits)
 
     name = "KNN (5)"
-    knc = neighbors.KNeighborsClassifier(n_neighbors=5)
-    train_test(name, knc, splits)
-    '''
+    knn = neighbors.KNeighborsClassifier(n_neighbors=5)
+    train_test(name, knn, splits)
 
     name = "Extra Trees"
     xtc = ensemble.ExtraTreesClassifier(n_jobs=-1)
     train_test(name, xtc, splits)
     #test_on_train(name, xtc, splits)
+    '''
 
     name = "Extra Trees (50)"
     xtc = ensemble.ExtraTreesClassifier( \
@@ -378,22 +288,64 @@ def main():
     train_test(name, xtc, splits)
     #test_on_train(name, xtc, splits)
 
+    '''
+    name = "Extra Trees (100) max depth 20"
+    xtc = ensemble.ExtraTreesClassifier( \
+            n_estimators=100, max_depth=20, n_jobs=-1)
+    train_test(name, xtc, splits)
+
+    name = "Extra Trees (100) max depth 30"
+    xtc = ensemble.ExtraTreesClassifier( \
+            n_estimators=100, max_depth=30, n_jobs=-1)
+    train_test(name, xtc, splits)
+    '''
+
     name = "Extra Trees (100)"
     xtc = ensemble.ExtraTreesClassifier( \
             n_estimators=100, n_jobs=-1)
     train_test(name, xtc, splits)
+    test_on_train(name, xtc, splits)
+
+
+    name = "MLP, (2*n) sgd adaptive"
+    nns = int(2*n_classes)
+    mlp = neural_network.MLPClassifier( \
+            solver='sgd', \
+            learning_rate='adaptive', \
+            learning_rate_init=0.7, \
+            hidden_layer_sizes=(nns), max_iter=1000)
+    train_test(name, mlp, splits)
+    test_on_train(name, mlp, splits)
+
+    name = "MLP, (3*n) sgd adaptive"
+    nns = int(3*n_classes)
+    mlp = neural_network.MLPClassifier( \
+            solver='sgd', \
+            learning_rate='adaptive', \
+            learning_rate_init=0.7, \
+            hidden_layer_sizes=(nns), max_iter=1000)
+    train_test(name, mlp, splits)
+    test_on_train(name, mlp, splits)
+
 
     name = "SVM C=25.0, gamma=auto, uniform weights"
     svmm = svm.SVC(C=25.0, gamma='auto', tol=0.00001, probability=True)
     train_test(name, svmm, splits)
 
     votc = ensemble.VotingClassifier(estimators=[ \
-            ('xt100',xtc),('svm',svmm)], \
-            voting='soft', weights=[4,9])
-    prs = train_test("Voting [ExtraTrees(100), SVM(C=25)] (soft)", votc, splits)
+            ('xt100',xtc),('svm',svmm),('mlp',mlp)], \
+            voting='hard')
+    prs = train_test("Voting [ExtraTrees(100), SVM(C=25), MLP] (hard)", votc, splits)
+    test_on_train(name, svmm, splits)
+
     print(metrics.classification_report(prs, splits['test_y']))
 
     '''
+    votc = ensemble.VotingClassifier(estimators=[ \
+            ('xt100',xtc),('svm',svmm),('mlp',mlp)], \
+            voting='soft', weights=[2,7,3])
+    prs = train_test("Voting [ExtraTrees(100), SVM(C=25), MLP] (soft)", votc, splits)
+
     bagc = ensemble.BaggingClassifier(svmm, max_samples=1.0, bootstrap=False, max_features=0.7, n_estimators=3, n_jobs=-1)
     train_test("Bagged (3) 0.7 SVM", bagc, splits)
 

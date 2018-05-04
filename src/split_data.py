@@ -11,10 +11,13 @@ def split_data(data, ratio):
     return train, test
 
 
-def get_splits(data, ratio, train_p, total_p):
-    data, ignore = split_data(data, total_p)
-    train, test = split_data(data, ratio)
-    train, ignore = split_data(train, train_p)
+def get_splits(data, total_p):
+    train = data['train']
+    test  = data['test']
+
+    if total_p < 1:
+        train, ignore = split_data(train, total_p)
+        test, ignore = split_data(test, total_p)
 
     col_list = train.columns.tolist()
     to_rm = ['symbol','fn']
@@ -30,15 +33,4 @@ def get_splits(data, ratio, train_p, total_p):
     return {'train_x': train_x, 'train_y': train_y, \
             'test_x': test_x, 'test_y': test_y}
 
-
-def main():
-    # Example usage
-    td = pd.DataFrame()
-
-    train, test = split_data(td, 0.7)
-    print(train.shape, test.shape)
-
-
-if __name__=='__main__':
-    main()
 

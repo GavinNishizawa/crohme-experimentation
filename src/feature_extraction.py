@@ -83,15 +83,31 @@ def extract_features(traces):
     angle = lambda a,b: (\
             math.degrees(math.atan2(b[1]-a[1], b[0]-a[0])))
 
-    # add first and last points and angle between
+    # add first, last points and angle, dx, dy between
     feat_arr = [pts[0][0],pts[0][1],pts[-1][0],pts[-1][1], \
-            angle(pts[-1], pts[0])]
+            angle(pts[-1], pts[0]), pts[-1][0]-pts[0][0], \
+            pts[-1][1]-pts[0][1]]
 
-    # add first 4 trace angles
-    f4_tas = [0]*4
+    avg_x = lambda t: sum([p[0] for p in t])/(len(t)+1)
+    avg_y = lambda t: sum([p[1] for p in t])/(len(t)+1)
+
+    # add angles, dx, dy for first 4 traces
+    f4t_as = [0]*4
+    f4t_dxs = [0]*4
+    f4t_dys = [0]*4
+    f4t_ax = [0]*4
+    f4t_ay = [0]*4
     for i in range(min(4,len(traces))):
-        f4_tas[i] = angle(traces[i][0], traces[i][-1])
-    feat_arr.extend(f4_tas)
+        f4t_as[i] = angle(traces[i][0], traces[i][-1])
+        f4t_dxs[i] = traces[i][-1][0] - traces[i][0][0]
+        f4t_dys[i] = traces[i][-1][1] - traces[i][0][1]
+        f4t_ax[i] = avg_x(traces[i])
+        f4t_ay[i] = avg_y(traces[i])
+    feat_arr.extend(f4t_as)
+    feat_arr.extend(f4t_dxs)
+    feat_arr.extend(f4t_dys)
+    feat_arr.extend(f4t_ax)
+    feat_arr.extend(f4t_ay)
 
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
@@ -136,7 +152,13 @@ def extract_features(traces):
     feat_arr.append(n_pts)
     r_angles = [0]*n_pts
     a_angles = [0]*n_pts
+    d_angles = [0]*n_pts
+    dd_angles = [0]*n_pts
     dists = [0]*n_pts
+    dxs = [0]*n_pts
+    dys = [0]*n_pts
+    ddxs = [0]*n_pts
+    ddys = [0]*n_pts
     c_dists = [0]*n_pts
     daa_pts = [None]*n_pts
     daa_pts[0] = (0,0)
@@ -146,6 +168,10 @@ def extract_features(traces):
 
         # relative angles
         r_angles[i] = a_angles[i] - a_angles[i-1]
+
+        # change in relative angle
+        d_angles[i] = r_angles[i] - r_angles[i-1]
+        dd_angles[i] = d_angles[i] - d_angles[i-1]
 
         # distance
         dists[i] = e_dist(pts[i], pts[i-1])
@@ -157,17 +183,34 @@ def extract_features(traces):
         daa_pts[i] = (IMG_SIZE*c_dists[i]/(total_sym_len+1), \
                 a_angles[i])
 
+        # dx and dy
+        dxs[i] = pts[i][0] - pts[i-1][0]
+        dys[i] = pts[i][1] - pts[i-1][1]
+
+        # ddx and ddy
+        ddxs[i] = dxs[i] - dxs[i-1]
+        ddys[i] = dys[i] - dys[i-1]
+
+
     # average distance between points
     avg_dist = sum(dists)/len(dists)
     feat_arr.append(avg_dist)
 
     # bin relative and absolute angles and daa pts
-    bin_sizes = [3,8]
+    bin_sizes = [5,10]
     for n_bins in bin_sizes:
         feat_arr.extend(bin_angles( \
                 r_angles, n_bins))
         feat_arr.extend(bin_angles( \
                 a_angles, n_bins))
+        feat_arr.extend(bin_angles( \
+                d_angles, n_bins))
+        feat_arr.extend(bin_angles( \
+                dd_angles, n_bins))
+
+        # % acute angles
+        feat_arr.append( \
+                sum([int(abs(a) > 90) for a in r_angles])/(len(r_angles)+1))
 
         # bin daa pts
         get_bin_ind = lambda d,n: int(d*n/IMG_SIZE)
@@ -179,6 +222,48 @@ def extract_features(traces):
 
         daa_bins = [ n%360 for n in daa_bins]
         feat_arr.extend(daa_bins)
+
+        # bin dx dy
+        dx_bins = [0]*n_bins
+        dy_bins = [0]*n_bins
+        get_bin_ind = lambda i: int(i*n_bins/n_pts)
+        for i in range(n_pts):
+            # index of bin
+            ind = get_bin_ind(i)
+            dx_bins[ind] += dxs[i]
+            dy_bins[ind] += dys[i]
+
+        dx_sum = sum(dx_bins)
+        dx_sum = dx_sum if dx_sum != 0 else 1
+        dy_sum = sum(dy_bins)
+        dy_sum = dy_sum if dy_sum != 0 else 1
+        dx_bins = [ n/dx_sum for n in dx_bins]
+        dy_bins = [ n/dy_sum for n in dy_bins]
+        feat_arr.append(dx_sum)
+        feat_arr.append(dy_sum)
+        feat_arr.extend(dx_bins)
+        feat_arr.extend(dy_bins)
+
+        # bin ddx ddy
+        ddx_bins = [0]*n_bins
+        ddy_bins = [0]*n_bins
+        get_bin_ind = lambda i: int(i*n_bins/n_pts)
+        for i in range(n_pts):
+            # index of bin
+            ind = get_bin_ind(i)
+            ddx_bins[ind] += ddxs[i]
+            ddy_bins[ind] += ddys[i]
+
+        ddx_sum = sum(ddx_bins)
+        ddx_sum = ddx_sum if ddx_sum != 0 else 1
+        ddy_sum = sum(ddy_bins)
+        ddy_sum = ddy_sum if ddy_sum != 0 else 1
+        ddx_bins = [ n/ddx_sum for n in ddx_bins]
+        ddy_bins = [ n/ddy_sum for n in ddy_bins]
+        feat_arr.append(ddx_sum)
+        feat_arr.append(ddy_sum)
+        feat_arr.extend(ddx_bins)
+        feat_arr.extend(ddy_bins)
 
     return feat_arr
 
@@ -219,19 +304,26 @@ def process_traces(traces):
                 pts[total_pts:(total_pts+t_len)])
         total_pts += t_len
 
-    midpoint = lambda a,b: ( \
+    def midpoint(a,b):
+        return ( \
             (a[0]+b[0])/2, \
             (a[1]+b[1])/2)
 
-    midpoint3 = lambda a,b,c: ( \
+    def midpoint3(a,b,c):
+        return( \
             (a[0]+b[0]+c[0])/3, \
             (a[1]+b[1]+c[1])/3)
+
+
+    feat_arr = extract_features(s_traces)
 
     # convert to midpoints of 3
     for t in s_traces:
         if len(t) > 3:
             for i in range(1,len(t)-1):
                 t[i] = midpoint3(t[i-1],t[i],t[i+1])
+
+    feat_arr3 = extract_features(s_traces)
 
     '''
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
@@ -246,7 +338,9 @@ def process_traces(traces):
     im.save("my_symbol.bmp")
     '''
 
-    feat_arr = extract_features(s_traces)
+    for i in range(len(feat_arr)):
+        feat_arr[i] += feat_arr3[i]
+        feat_arr[i] /= 2
 
     feat_arr.extend((total_sym_len, ar, len(traces), width, height))
     return feat_arr
