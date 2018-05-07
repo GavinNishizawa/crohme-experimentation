@@ -138,7 +138,7 @@ def train_drfs(train_x, train_y, eps=0.5, threshold="median"):
 
     # train the model pipeline
     dr_pipe = pipeline.Pipeline([('scaler', scaler), \
-            ('feat_agg', feat_agg),('scaler2', scaler2)])
+            ('feat_agg', feat_agg), ('scaler2', scaler2)])
 
     dr_pipe.fit(train_x)
 
@@ -248,7 +248,7 @@ def main():
 
 
     # apply dim reduction and feature selection
-    splits = apply_drfs(splits, load=False, eps=0.001, threshold="0.9*mean")#0.004)
+    splits = apply_drfs(splits, load=False, eps=0.001, threshold="mean")#0.004)
 
     n_samples, n_features, n_classes = get_counts(splits)
 

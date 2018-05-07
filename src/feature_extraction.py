@@ -44,29 +44,35 @@ def scale_angle_pts(pts, n_bins):
     return saps
 
 
+def bin_angle(angle, n_bins=8):
+    get_bin_ind = lambda a: round(n_bins*(a%360)/360)%n_bins
+    bin_size = 360/n_bins
+
+    # index of bin for angle
+    ind1 = get_bin_ind(angle)
+
+    # index of bin for angle with offset
+    # forwards of 1/3 the bin size
+    ind2 = get_bin_ind(angle + bin_size/3)
+
+    # index of bin for angle with offset
+    # backwards of 1/3 the bin size
+    ind3 = get_bin_ind(angle - bin_size/3)
+
+    return ind1, ind2, ind3
+
+
 def bin_angles(angles, n_bins=8):
-    get_bin_ind = lambda a,n: round(n*(a%360)/360)%n
-    bin_size = (360/n_bins)/3
 
     angle_bins = [0]*n_bins
     for a in angles:
-        # index of bin for angle
-        ind = get_bin_ind(a, n_bins)
-        angle_bins[ind] += 1
+        ind1,ind2,ind3 = bin_angle(a, n_bins)
+        angle_bins[ind1] += 1
+        angle_bins[ind2] += 1
+        angle_bins[ind3] += 1
 
-        # index of bin for angle with offset
-        # forwards of 1/3 the bin size
-        a_o_f = a + bin_size
-        ind = get_bin_ind(a_o_f, n_bins)
-        angle_bins[ind] += 1
-
-        # index of bin for angle with offset
-        # backwards of 1/3 the bin size
-        a_o_b = a - bin_size
-        ind = get_bin_ind(a_o_b, n_bins)
-        angle_bins[ind] += 1
-
-    total_binned = sum(angle_bins) + 1
+    total_binned = sum(angle_bins)
+    total_binned = 1 if total_binned == 0 else total_binned
 
     # scale bin counts by number of total angles
     angle_bins = [ n/total_binned for n in angle_bins]
@@ -97,12 +103,49 @@ def extract_features(traces):
     f4t_dys = [0]*4
     f4t_ax = [0]*4
     f4t_ay = [0]*4
+    n_bins = 7
+    f4t_daas = [[0]*n_bins for i in range(4)]
     for i in range(min(4,len(traces))):
         f4t_as[i] = angle(traces[i][0], traces[i][-1])
         f4t_dxs[i] = traces[i][-1][0] - traces[i][0][0]
         f4t_dys[i] = traces[i][-1][1] - traces[i][0][1]
         f4t_ax[i] = avg_x(traces[i])
         f4t_ay[i] = avg_y(traces[i])
+
+        n_pts = len(traces[i])
+        total_len = 0
+        for j in range(1,n_pts):
+            total_len += e_dist(traces[i][j], traces[i][j-1])
+        total_len = 1 if total_len == 0 else total_len
+
+        a_angles = [0]*n_pts
+        dists = [0]*n_pts
+        c_dists = [0]*n_pts
+        daa_pts = [(0,0)]*n_pts
+        for j in range(1,n_pts):
+            a_angles[j] = angle(traces[i][j], traces[i][j-1])
+            dists[j] = e_dist(traces[i][j], traces[i][j-1])
+            c_dists[j] = dists[j] + c_dists[j-1]
+            # (IMG_SIZE * scaled distance, abs angle) pts
+            daa_pts[j] = (IMG_SIZE*c_dists[j]/total_len, \
+                    a_angles[j])
+
+        # bin daa pts
+        get_bin_ind = lambda d,n: int(d*n/IMG_SIZE - 1e-8)
+        daa_bins = [[] for i in range(n_bins)]
+        for p in daa_pts:
+            # index of bin
+            ind = get_bin_ind(p[0], n_bins)
+            daa_bins[ind].append(sum(bin_angle(p[1],n_bins)))
+
+        for j in range(n_bins):
+            n_pts = len(daa_bins[j])
+            n_pts = 1 if n_pts == 0 else n_pts
+            f4t_daas[i][j] = sum(daa_bins[j])/n_pts
+
+    for i in range(4):
+        feat_arr.extend(f4t_daas[i])
+
     feat_arr.extend(f4t_as)
     feat_arr.extend(f4t_dxs)
     feat_arr.extend(f4t_dys)
@@ -112,7 +155,7 @@ def extract_features(traces):
     scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
 
     # draw image from traces at different scales
-    img_sizes = [5,10]
+    img_sizes = [5,11]
     for sz in img_sizes:
         im = Image.new('1', (sz,sz))
         draw = ImageDraw.Draw(im)
@@ -197,7 +240,7 @@ def extract_features(traces):
     feat_arr.append(avg_dist)
 
     # bin relative and absolute angles and daa pts
-    bin_sizes = [5,10]
+    bin_sizes = [5,11]
     for n_bins in bin_sizes:
         feat_arr.extend(bin_angles( \
                 r_angles, n_bins))
@@ -324,19 +367,6 @@ def process_traces(traces):
                 t[i] = midpoint3(t[i-1],t[i],t[i+1])
 
     feat_arr3 = extract_features(s_traces)
-
-    '''
-    scale = lambda p,sv: tuple((p[0]/sv, p[1]/sv))
-    print(s_traces)
-    sz = IMG_SIZE
-    im = Image.new('1', (sz,sz))
-    draw = ImageDraw.Draw(im)
-    sv = IMG_SIZE/sz
-    for t in s_traces:
-        s_pts = [scale(p,sv) for p in t]
-        draw.line(s_pts, fill=128, width=1)
-    im.save("my_symbol.bmp")
-    '''
 
     for i in range(len(feat_arr)):
         feat_arr[i] += feat_arr3[i]
